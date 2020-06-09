@@ -3,19 +3,6 @@ title: "DATA 612 Project 1 - Global Baseline Predictors and RMSE"
 author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
 date: "6/6/2020"
 output:
-  word_document:
-    toc: yes
-    toc_depth: '5'
-  html_document:
-    df_print: paged
-    toc: yes
-    toc_collapsed: yes
-    toc_float: yes
-  pdf_document:
-    extra_dependencies:
-    - geometry
-    - multicol
-    - multirow
   rmdformats::readthedown:
     code_folding: hide
     df_print: paged
@@ -26,6 +13,19 @@ output:
     toc_collapsed: yes
     toc_depth: 5
     toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
 theme: lumen
 number_sections: yes
 toc_depth: 3
@@ -58,7 +58,7 @@ library(gplots)
 
 # Read Data
 ```{r message=FALSE, warning=FALSE}
-data <- read_csv('https://raw.githubusercontent.com/oggyluky11/DATA-612-2020-SUMMER/master/Project%201/McDoland%20Meal%20Friend%20Rating.csv')
+data <- read_csv('https://raw.githubusercontent.com/shirley-wong/Data-612/master/Project-1/McDonald%20Meal%20Friend%20Rating.csv')
 
 data
 ```
