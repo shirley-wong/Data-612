@@ -2,6 +2,6 @@
 
 Project Group Members:
 
-Zhi Ying Chen
-Sin Ying Wong
-Fan Xu
+Zhi Ying Chen (Ricki)
+Sin Ying Wong (Shirley)
+Fan Xu (Frank)
