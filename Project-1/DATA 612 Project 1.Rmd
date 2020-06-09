@@ -1,0 +1,301 @@
+---
+title: "DATA 612 Project 1 - Global Baseline Predictors and RMSE"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "6/6/2020"
+output:
+  word_document:
+    toc: yes
+    toc_depth: '5'
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Instruction
+In this first assignment, we will attempt to predict ratings with very little information.  We will first look at just raw averages across all (training dataset) users.  We will then account for "bias" by normalizing across users and across items.  We will work with ratings in a user-item matrix, where each rating may be (1) assigned to a training dataset, (2) assigned to a test dataset, or (3) missing.
+
+
+# Introduction
+In this project, a simple recommender system of McDonald's Combo Meals is created. This system recommends McDonald's Combo Meals to readers/customers who may then be interested to try out other Combo Meals than their usual calls.  The data (ratings of Combo Meals) used in this project is collected by the three group members from themselves and their friends. The dataset contains a total of 10 users (customers) and their ratings of 11 items (McDonald's Combo Meals).
+
+
+# Load Packages
+```{r message=FALSE, warning=FALSE}
+library(rmdformats)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(formattable)
+library(caTools)
+library(yardstick)
+library(gplots)
+```
+
+
+# Read Data
+```{r message=FALSE, warning=FALSE}
+data <- read_csv('https://raw.githubusercontent.com/oggyluky11/DATA-612-2020-SUMMER/master/Project%201/McDoland%20Meal%20Friend%20Rating.csv')
+
+data
+```
+
+
+# Data Exploration
+The data is in long format.  From the summary below, we can see that not all customers(/users) have rated all 11 products(/items).  Only Friend 1 has rated all 11 products.  
+
+After reshapping the data into a user-item matrix, it is observed that there are 23 missing values within all user-item combinations.  The data is not very sparse according to the heatmap shown below.
+
+
+Before reshaping:
+```{r message=FALSE, warning=FALSE}
+data %>% 
+  mutate_if(is.character,as.factor) %>% 
+  summary(maxsum = 20)
+```
+
+After reshaping:
+```{r}
+data %>% 
+  spread(key = `Combo Meal`, value = Rating) %>%
+  gather(key = `Combo Meal`, value = Rating, - Customer) %>%
+  mutate_if(is.character,as.factor) %>% 
+  summary(maxsum = 20)
+```
+
+Heatmap:
+```{r}
+data %>%
+  spread(key = `Combo Meal`, value = Rating) %>%
+  column_to_rownames('Customer') %>%
+  as.matrix() %>%
+  heatmap.2(trace = 'none',
+            density.info = 'none',
+            dendrogram = 'none',
+            Rowv = FALSE,
+            Colv = FALSE,
+            col = colorRampPalette(c("grey", "deeppink4"))(n = 299))
+
+```
+
+
+# Separate Training Dataset & Test Dataset
+The ratings of McDonald's Combo Meal are then split into training dataset (85%) and test dataset (15%).  In the `Train_Test_Split` table below, the training dataset is set to BLUE and the test dataset is set to RED under the `Data_Group` column.
+
+```{r}
+set.seed(3)
+data_split <- data %>%
+  mutate(Data_Group = sample.split(Rating, 0.85)) %>%
+  mutate(Data_Group = if_else(Data_Group==TRUE, 'Train', 'Test'))
+
+data_train <- data_split %>% 
+  filter(Data_Group == 'Train') %>%
+  select(-Data_Group)
+
+data_test <- data_split %>% 
+  filter(Data_Group == 'Test') %>%
+  select(-Data_Group) 
+
+data_split %>%
+  mutate(
+  Data_Group = cell_spec(Data_Group, background = if_else(Data_Group == 'Test',
+                                                    'lightpink','lightblue'))) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "bordered"),
+                full_width = FALSE,
+                font_size = 12) %>%
+  add_header_above(c('Train_Test_Split' = 4)) %>%
+  scroll_box(width = "100%", height = "400px")
+```
+
+
+# Create a User-Item Matrix
+Reshaping the complete dataset from long format to wide format, with customers as users (in rows) and products as items (in columns). The training dataset and test dataset are separated by color with null values showing as '?' in the table below.
+
+```{r}
+options(knitr.kable.NA = '?')
+data_split %>% 
+  mutate(Rating = cell_spec(Rating,'html',
+                            background  = if_else(Data_Group == 'Test','lightpink','lightblue'))) %>%
+  select(-Data_Group) %>%
+  spread(`Combo Meal`, Rating) %>%
+  arrange(desc(Customer)) %>%
+  kable(escape = FALSE, caption = 'User-Item Matrix', align = 'lccccccccccc') %>%
+  kable_styling(bootstrap_options = c("striped", "bordered"),
+                full_width = FALSE,
+                font_size = 12) %>%
+  add_header_above(c('User', 'Item' = 11)) %>%
+  footnote(symbol = 'The numbers in BLUE are training set, and those in RED are test set') 
+
+```
+
+
+# Calculate Raw Average Rating
+Calculate the raw average rating for every user-item combination.
+
+```{r}
+mean_train_raw <- mean(data_train$Rating)
+
+print(str_c('Raw average rating for every user-item combination: ', as.character(mean_train_raw)))
+```
+
+
+# Calculate RMSE for Raw Average
+Calculate RMSE for raw average rating for both of the training dataset and test dataset.
+
+```{r}
+RMSE_train_raw <- (data_train$Rating - mean_train_raw)^2 %>% mean() %>% sqrt()
+
+print(str_c('RMSE of raw average rating for training set: ', as.character(RMSE_train_raw)))
+
+RMSE_test_raw <- (data_test$Rating - mean_train_raw)^2 %>% mean() %>% sqrt()
+
+print(str_c('RMSE of raw average rating for test set: ', as.character(RMSE_test_raw)))
+```
+
+
+# Calculate the bias for each user and each item
+Using the training dataset, we calculate the bias for each user and each item.
+
+From the bias table below, it is observed that Friend 7 is the harshest customer, while the most popular product is the 10-Piece Chicken McNuggets Meal Combo.
+
+```{r}
+options(knitr.kable.NA = '')
+user_bias_tb <- data_train %>% 
+  group_by(Customer) %>%
+  summarise(User_Bias = mean(Rating) - mean_train_raw)
+
+
+item_bias_tb <- data_train %>%
+  group_by(`Combo Meal`) %>%
+  summarise(Item_Bias = mean(Rating) - mean_train_raw)
+
+
+user_bias_tb %>% 
+  arrange(desc(User_Bias)) %>%
+  data.frame(row.names = NULL) %>%
+  merge(item_bias_tb %>% 
+          arrange(desc(Item_Bias)) %>%
+          data.frame(row.names = NULL), by = 0, all = TRUE) %>%
+  arrange(desc(User_Bias)) %>%
+  select(-Row.names) %>%
+  kable(escape = FALSE, caption = 'Bias') %>%
+  add_header_above(c('Bias for User' = 2, 'Bias for Item' = 2)) 
+
+```
+
+
+# Calculate the Baseline Predictors
+From the raw average rating, and the appropriate user and item biases, we calculate the baseline predictors for every user-item combination and present them by the table below.
+
+```{r}
+baseline_pred <- data.frame('Customer' = character(),
+                            'Combo_Meal' = character(),
+                            'Baseline_Predictor' = numeric(),
+                            stringsAsFactors = FALSE)
+
+
+for (user in data$Customer %>% unique()){
+  for(item in data$`Combo Meal` %>% unique()){
+    user_bias <- user_bias_tb$User_Bias[user_bias_tb$Customer == user]
+    item_bias <- item_bias_tb$Item_Bias[item_bias_tb$`Combo Meal` == item]
+    baseline_predictor <- pmax(pmin(mean_train_raw + user_bias + item_bias,5),1) 
+    
+    baseline_pred <- add_row(baseline_pred,
+                             Customer = user,
+                             Combo_Meal = item,
+                             Baseline_Predictor = baseline_predictor)
+  }
+}
+
+
+baseline_pred %>%
+  spread(key = 'Combo_Meal', value = 'Baseline_Predictor') %>%
+  kable(caption = 'Baseline Predictors') %>%
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE,
+                font_size = 12) %>%
+  add_header_above(c('User', 'Item' = 11))
+  
+```
+
+
+# Calculate RMSE for Baseline Predictors
+Finally, we calculate the RMSE for the baseline predictors for both of the training dataset and the test dataset.
+
+```{r}
+RMSE_train_baseline_pred <- data_train %>% 
+  left_join(baseline_pred, by = c('Customer' = 'Customer', 'Combo Meal' = 'Combo_Meal')) %>%
+  rmse(Rating, Baseline_Predictor) %>%
+  .$`.estimate`
+
+print(str_c('RMSE of baseline predictor for training set: ', RMSE_train_baseline_pred))
+
+
+RMSE_test_baseline_pred <- data_test %>% 
+  left_join(baseline_pred, by = c('Customer' = 'Customer', 'Combo Meal' = 'Combo_Meal')) %>%
+  rmse(Rating, Baseline_Predictor) %>%
+  .$`.estimate`
+
+print(str_c('RMSE of baseline predictor for test set: ', RMSE_test_baseline_pred))
+```
+
+
+# Summary
+We have calculated the RMSE for raw average rating for our training dataset and test dataset earlier, and also the RMSE for the baseline predictors for both datasets.  To compare the results, we can calculate the percentage increase/decrease of the two RMSE for the training and test datasets respectively.
+
+From the results below, we can see that the RMSE for the training dataset is decreased by 10.31%, and that for the test dataset is decreased by 16.46% by using the baseline predictors instead of the raw average ratings.  
+
+Therefore, the performances of the RMSE for the baseline predictors are better.
+
+
+```{r}
+data.frame(Metrics = c('RMSE_Train_Raw', 
+                       'RMSE_Train_Baseline_Pred', 
+                       '% Change in RMSE of training set',
+                       'RMSE_Test_Raw', 
+                       'RMSE_Test_Baseline_Pred',
+                       '% Change in RMSE of Test Set'),
+Value = c(RMSE_train_raw, 
+          RMSE_train_baseline_pred, 
+          (RMSE_train_baseline_pred - RMSE_train_raw)/RMSE_train_raw,
+          RMSE_test_raw, 
+          RMSE_test_baseline_pred,
+          (RMSE_test_baseline_pred - RMSE_test_raw)/RMSE_test_raw),
+stringsAsFactors = FALSE) %>%
+  mutate(Value = case_when(str_detect(Metrics, '%') ~ cell_spec(str_c(as.character(round(Value*100,2)),'%'), bold = TRUE),
+                           TRUE ~ if_else(str_detect(Metrics,'Train'),
+                                          color_bar('lightblue')(Value),
+                                          color_bar('lightpink')(Value))),
+         Metrics = case_when(str_detect(Metrics, '%') ~ cell_spec(Metrics, bold = TRUE),
+                             TRUE ~ Metrics)) %>%
+  kable(escape = FALSE, caption = 'Summary',align = 'lr') %>%
+  kable_styling('hover') %>%
+  row_spec(c(1,2,4,5), background = 'white') %>%
+  row_spec(c(3,6), background = 'lightgrey')
+
+
+```
