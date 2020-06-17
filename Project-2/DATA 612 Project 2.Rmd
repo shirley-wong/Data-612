@@ -1,0 +1,326 @@
+---
+title: "DATA 612 Project 2 - Content-Based and Collaborative Filtering"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "6/13/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Instruction
+In this second assignment, starting with an existing dataset of user-item ratings, we will implement at least two of these recommendation algorithms: (1) Content-Based Filtering, (2) User-User Collaborative Filtering, and (3) Item-Item Collaborative Filtering. 
+
+
+# Introduction
+In this project, we will implement User-Based Collaborative Filtering and Item-Based Collaborative Filtering algorithms, evaluate and compare different approaches by using different normalization techniques, similarity methods, and/or neighborhood sizes for our dataset of user-item ratings.
+
+We will use one of the Jester datasets for Recommender Systems and Collaborative Filtering Research by Ken Goldberg, AUTOLab, UC Berkeley [http://eigentaste.berkeley.edu/dataset/] as our raw dataset.
+
+
+# Load Packages
+```{r load package, message=FALSE, warning=FALSE}
+library(recommenderlab)
+library(tidyverse)
+library(kableExtra)
+library(formattable)
+library(caTools)
+library(grid)
+library(naniar)
+
+```
+
+
+# Read Data
+```{r read data, message=FALSE, warning=FALSE}
+data <- read_csv('https://raw.githubusercontent.com/shirley-wong/Data-612/master/Project-2/jester_data_1_3.csv', col_names = FALSE) 
+
+colnames(data) <- c('User_Rating_Cnt',str_c('J', c(1:100)))
+data 
+```
+
+
+# Data Exploration
+The dataset is a matrix with dimensions 24,938 rows x 101 columns.  It contains ratings from 24,938 users who have rated between 15 and 35 jokes ranging from -10.00 to +10.00, with '99' corresponds to 'null' value.  One row represents one user, while the first column gives the number of jokes rated by that user. The next 100 columns give the ratings for jokes 01-100.
+
+```{r data exploration i, message=FALSE, warning=FALSE}
+# data cleaning
+ui_mtrx <- data %>%
+  #add row number as User_ID
+  mutate(User_ID = row_number()) %>%
+  #convert value '99' to NA
+  gather(key = 'Joke', value = 'Rating', -User_ID,-User_Rating_Cnt) %>%
+  filter(Rating != 99) %>%
+  spread(key = 'Joke', value = 'Rating') 
+  #top_n(User_Rating_Cnt, n = 10000) 
+ui_mtrx
+```
+
+After replacing the '99' values with 'NA', we got the summary statistics of the `User_Rating_Cnt` and `Rating` after eliminating the 'NA' values.  From the summary statistics shown below, we can see that the users have rated about 26 jokes in average with range (15,35) and the ratings are in the range of (-9.95, 10) with mean 0.2964.
+
+```{r data exploration ii, message=FALSE, warning=FALSE}
+ui_mtrx_long <- ui_mtrx %>%
+  gather(key = 'Joke', value = 'Rating', -User_ID, -User_Rating_Cnt, na.rm = TRUE)
+
+#Summary
+ui_mtrx_long %>% select(User_Rating_Cnt, Rating) %>% summary()
+```
+
+The histogram also shows the distributions of the ratings of our dataset.  It also shows the mode rating of the dataset as -0.29.
+
+```{r data exploration iii, message=FALSE, warning=FALSE}
+# Histogram
+mode <- ui_mtrx_long %>%
+  group_by(Rating) %>%
+  summarise(Count = n()) %>%
+  top_n(1) %>%
+  select(Rating) %>%
+  as.numeric()
+
+ui_mtrx_long %>%
+  ggplot(aes(x = Rating, col = ..count..)) +
+  geom_bar() +
+  annotation_custom(grobTree(textGrob(str_c('<-- Mode = ', mode %>% as.character()), x= 0.5, y = 0.85, hjust = 0)))
+```
+
+The heatmap of partial dataset shows that some users are easy raters with mostly blue row and some are harsh with grey and red grids in a row. Also, some jokes have only a few ratings, which may be newly published and still waiting to be rated.  
+
+```{r data exploration iv, message=FALSE, warning=FALSE}
+#heatmap
+ui_mtrx_rr <- ui_mtrx %>%
+  select(-User_Rating_Cnt, -User_ID) %>%
+  #column_to_rownames('User_ID') %>%
+  as.matrix() %>% 
+  as("realRatingMatrix")
+ui_mtrx_small <- ui_mtrx_rr[rowCounts(ui_mtrx_rr) > 15, colCounts(ui_mtrx_rr) >= 20000]
+image(ui_mtrx_small[1:15,])
+
+```
+
+The user biases and uneven deficiency on item ratings implies that normalization is needed for our dataset when creating our recommender system.
+
+
+# Data Sampling
+As the dataset is relatively large, we decided to draw a subset from it.  
+
+From the two histograms below, we have a general view of the distributions of the user-rating-count and item-rating-count.  From there, we decided to filter the users who have rated 35 jokes and which has 100 or more user ratings. It comes up with a matrix with 932 rows x 40 columns with 29088 ratings in total.
+
+The subset is then randomly divided into training dataset (80%) and test dataset (20%) by using the `evaluationScheme` function from the `recommenderlab` package with the cross-validation techniques.
+
+```{r data sampling, message=FALSE, warning=FALSE}
+set.seed(0)
+rowCounts(ui_mtrx_rr) %>% hist(col = 'deeppink3', main = 'Histogram: User Rating Count')
+colCounts(ui_mtrx_rr) %>% hist(col = 'deeppink3', main = 'Histogram: Item Rating Count')
+
+ui_mtrx_sample <- ui_mtrx_rr[rowCounts(ui_mtrx_rr)>=35] 
+ui_mtrx_sample <- ui_mtrx_sample[rowCounts(ui_mtrx_sample)>=0, colCounts(ui_mtrx_sample)>=100]
+
+ui_mtrx_split <- evaluationScheme(data=ui_mtrx_sample, method='cross-validation', k = 5, given=25, goodRating=0)
+ui_mtrx_split
+
+ui_mtrx_train <- getData(ui_mtrx_split, 'train')
+ui_mtrx_test_known <- getData(ui_mtrx_split, 'known')
+ui_mtrx_test_unknown <- getData(ui_mtrx_split, 'unknown')
+
+```
+
+
+# Building the Recommendation Models
+We will then implement the User-Based Collaborative Filtering (UBCF) and Item-Based Collaborative Filtering (IBCF) algorithms to the datasets. We will also use different normalization techniques (centering and Z-score) and similarity measures (Cosine distance, Pearson correlation, and Euclidean distance) for our datasets.
+
+
+## User-Based Collaborative Filtering Models
+We will create 6 models of User-Based Collaborative Filtering algorithm by using the `Recommender` function from the `recommenderlab` package with two normalization techniques (center and Z-score) and three similarity measures (Cosine distance, Pearson correlation, and Euclidean distance).
+
+After restricting the rating boundary to (-10, 10), we calculate the accuracies of the predictions with the actual ratings given by users.  The result is sorted by RMSE in ascending order.  
+
+The UBCF model using centering normalization and Pearson correlation similarity measure (`model_UBCF_CP`)is the best model among the six UBCF models.
+
+```{r UBCF}
+#UBCF models
+model_UBCF_CC <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Cosine"))
+
+model_UBCF_CP <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Pearson"))
+
+model_UBCF_CE <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Euclidean"))
+
+model_UBCF_ZC <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Cosine"))
+
+model_UBCF_ZP <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Pearson"))
+
+model_UBCF_ZE <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Euclidean"))
+
+
+suppress_rating <- function(x, min = -10, max = 10){
+  return(pmax(pmin(x, 10),-10))
+  }
+
+
+#predictions with boundaries set
+p_UBCF_CC <- predict(model_UBCF_CC, ui_mtrx_test_known, type='ratings')
+p_UBCF_CC@data@x <- pmax(pmin(p_UBCF_CC@data@x, 10),-10)
+
+p_UBCF_CP <- predict(model_UBCF_CP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CP@data@x <- pmax(pmin(p_UBCF_CP@data@x, 10),-10)
+
+p_UBCF_CE <- predict(model_UBCF_CE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CE@data@x <- pmax(pmin(p_UBCF_CE@data@x, 10),-10)
+
+p_UBCF_ZC <- predict(model_UBCF_ZC, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZC@data@x <- pmax(pmin(p_UBCF_ZC@data@x, 10),-10)
+
+p_UBCF_ZP <- predict(model_UBCF_ZP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZP@data@x <- pmax(pmin(p_UBCF_ZP@data@x, 10),-10)
+
+p_UBCF_ZE <- predict(model_UBCF_ZE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZE@data@x <- pmax(pmin(p_UBCF_ZE@data@x, 10),-10)
+
+
+#accuracies
+UBCF_Model_Metrics <- rbind(
+  'UBCF_CC' = calcPredictionAccuracy(p_UBCF_CC, ui_mtrx_test_unknown),
+  'UBCF_CP' = calcPredictionAccuracy(p_UBCF_CP, ui_mtrx_test_unknown),
+  'UBCF_CE' = calcPredictionAccuracy(p_UBCF_CE, ui_mtrx_test_unknown),
+  'UBCF_ZC' = calcPredictionAccuracy(p_UBCF_ZC, ui_mtrx_test_unknown),
+  'UBCF_ZP' = calcPredictionAccuracy(p_UBCF_ZP, ui_mtrx_test_unknown),
+  'UBCF_ZE' = calcPredictionAccuracy(p_UBCF_ZE, ui_mtrx_test_unknown)
+) %>%
+  data.frame() %>%
+  rownames_to_column('Model') %>%
+  arrange(RMSE)
+
+
+UBCF_Model_Metrics %>%
+  mutate_if(is.numeric, ~round(.,6)) %>%
+  mutate(RMSE = cell_spec(RMSE, bold  = ifelse(RMSE == min(RMSE),TRUE,FALSE)),
+         MSE = cell_spec(MSE, bold  = ifelse(MSE == min(MSE),TRUE,FALSE)),
+         MAE = cell_spec(MAE, bold  = ifelse(MAE == min(MAE),TRUE,FALSE))
+         ) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Comparison of User-Based Collaborative Filtering Models' = 4)) 
+
+```
+
+
+## Item-Based Collaborative Filtering Models
+We will then create 6 models of Item-Based Collaborative Filtering algorithm with the same method: by using the `Recommender` function from the `recommenderlab` package with two normalization techniques (center and Z-score) and three similarity measures (Cosine distance, Pearson correlation, and Euclidean distance).
+
+After restricting the rating boundary to (-10, 10), we calculate the accuracies of the predictions with the actual ratings given by users.  The result is sorted by RMSE in ascending order.  
+
+The IBCF model using centering normalization and Eucliden distance similarity measure (`model_IBCF_CE`) is the best model among the six IBCF models.
+
+```{r IBCF}
+#IBCF models
+model_IBCF_CC <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Cosine"))
+
+model_IBCF_CP <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Pearson"))
+
+model_IBCF_CE <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Euclidean"))
+
+model_IBCF_ZC <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Cosine"))
+
+model_IBCF_ZP <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Pearson"))
+
+model_IBCF_ZE <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Euclidean"))
+
+
+#predictions with boundaries set
+p_IBCF_CC <- predict(model_IBCF_CC, ui_mtrx_test_known, type='ratings')
+p_UBCF_CC@data@x <- pmax(pmin(p_IBCF_CC@data@x, 10),-10)
+
+p_IBCF_CP <- predict(model_IBCF_CP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CP@data@x <- pmax(pmin(p_IBCF_CP@data@x, 10),-10)
+
+p_IBCF_CE <- predict(model_IBCF_CE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CE@data@x <- pmax(pmin(p_IBCF_CE@data@x, 10),-10)
+
+p_IBCF_ZC <- predict(model_IBCF_ZC, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZC@data@x <- pmax(pmin(p_IBCF_ZC@data@x, 10),-10)
+
+p_IBCF_ZP <- predict(model_IBCF_ZP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZP@data@x <- pmax(pmin(p_IBCF_ZP@data@x, 10),-10)
+
+p_IBCF_ZE <- predict(model_IBCF_ZE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZE@data@x <- pmax(pmin(p_IBCF_ZE@data@x, 10),-10)
+
+
+#accuracies
+IBCF_Model_Metrics <- rbind(
+  'IBCF_CC' = calcPredictionAccuracy(p_IBCF_CC, ui_mtrx_test_unknown),
+  'IBCF_CP' = calcPredictionAccuracy(p_IBCF_CP, ui_mtrx_test_unknown),
+  'IBCF_CE' = calcPredictionAccuracy(p_IBCF_CE, ui_mtrx_test_unknown),
+  'IBCF_ZC' = calcPredictionAccuracy(p_IBCF_ZC, ui_mtrx_test_unknown),
+  'IBCF_ZP' = calcPredictionAccuracy(p_IBCF_ZP, ui_mtrx_test_unknown),
+  'IBCF_ZE' = calcPredictionAccuracy(p_IBCF_ZE, ui_mtrx_test_unknown)
+) %>%
+  data.frame() %>%
+  rownames_to_column('Model') %>%
+  arrange(RMSE)
+
+
+IBCF_Model_Metrics %>%
+  mutate_if(is.numeric, ~round(.,6)) %>%
+  mutate(RMSE = cell_spec(RMSE, bold  = ifelse(RMSE == min(RMSE),TRUE,FALSE)),
+         MSE = cell_spec(MSE, bold  = ifelse(MSE == min(MSE),TRUE,FALSE)),
+         MAE = cell_spec(MAE, bold  = ifelse(MAE == min(MAE),TRUE,FALSE))
+         ) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Comparison of Item-Based Collaborative Filtering Models' = 4))
+
+```
+
+
+# Summary
+The barplot below compares all 12 models' accuracies in the same graph.  It is sorted by RMSE in ascending order. The lower the RMSE value, the better the performance of the model.
+
+The result shows that the User-Based Collaborative Filtering Model with centering normalization and Pearson correlation similarity measure performs best among all 12 models by having the smallest RMSE value (4.2692). It matches with the statement from *Building a Recommendation System with R* by Suresh K Gorakala and Michele Usuelli that "empirical studies showed that Pearson coefficient outperformed other similarity measure for user-based collaborative filtering recommender systems".
+
+Overall, UBCF models have better performances than IBCF models in general from our result.
+
+
+```{r summary}
+UBCF_Model_Metrics %>%
+  rbind(IBCF_Model_Metrics) %>%
+  select(Model, RMSE) %>%
+  ggplot(aes(x=reorder(Model, -RMSE), y=RMSE, fill=RMSE)) +
+  geom_text(aes(label=round(RMSE,4), hjust = 'left'))+
+  geom_bar(stat='identity') +
+  coord_flip()+
+  ylim(0,6)+
+  scale_fill_gradient(low = 'deeppink1', high = 'deeppink4') +
+  labs(title = 'RMSE Comparison of All Models',
+       x = 'MODEL', 
+       y = 'RMSE')
+  
+```
+
+
