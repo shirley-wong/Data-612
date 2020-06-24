@@ -1,0 +1,538 @@
+---
+title: "DATA 612 Project 3 - Matrix Factorization Methods"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "6/20/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Instruction
+In this assignment, we will implement a matrix factorization method - such as singular value decomposition (SVD) or Alternating Least Squares (ALS) - in the context of a recommender system by starting with an existing recommender system written by ourselves. 
+
+
+# Introduction
+In this project, we will implement a matrix factorization method, singular value decomposition (SVD), in the context of a recommender system, and compare its performance with the User-Based Collaborative Filtering (UBCF) model and Item-Based Collaborative Filtering (IBCF) model evaluated with different approaches from our previous assignment.
+
+From the brief explanation of SVD by Standford University [https://youtu.be/yLdOS6xyM_Q], in linear algebra, the singular value decomposition (SVD) is a factorization of a matrix that generalizes the eigendecomposition of a square normal matrix to any $m*n$ matrix via an extension of the polar decomposition, which requires no missing values.  The singular value decomposition of an $m*n$ matrix $A$ is a factorization of the form $U \Sigma V^T$, i.e. $A = U \Sigma V^T$, where $U$ is an $m*r$ orthogonal matrix, $\Sigma$ is an $r*r$ diagonal matrix with the $\sigma_{ii}$ values in descending order, and $V$ is an $n*r$ orthogonal matrix, where $r \le min(m,n)$ is the rank of the original matrix $A$.
+
+From the dimensionality reduction introduced by Standford University [https://youtu.be/c7e-D2tmRE0], SVD gives the best low rank approximation matrix $B = USV^T$ from matrix $A$ by keeping 80% to 90% of the sum of the squares of the singular values ($\sum \sigma_{ii}^2$), where $S$ is a diagonal $r*r$ matrix with its diagonal values $s_{ii} = \sigma_{ii} (i=1...k)$ else $s_{ii}=0$, which implies the formula $$\frac {\sum_{i=1}^{k}\sigma_{ii}^2} {\sum_{i=1}^{r} \sigma_{ii}^2} \approx 0.9$$.
+
+We will use one of the Jester datasets for Recommender Systems and Collaborative Filtering Research by Ken Goldberg, AUTOLab, UC Berkeley [http://eigentaste.berkeley.edu/dataset/] as our raw dataset.
+
+
+# Load Packages
+```{r load package, message=FALSE, warning=FALSE}
+library(recommenderlab)
+library(tidyverse)
+library(kableExtra)
+library(formattable)
+library(caTools)
+library(grid)
+library(knitr)
+library(Matrix)
+```
+
+
+# Read Data
+Only the first five rows of data are displayed in order to compress the size of the output file.
+```{r read data, message=FALSE, warning=FALSE}
+data <- read_csv('https://raw.githubusercontent.com/shirley-wong/Data-612/master/Project-3/jester_data_1_3.csv', col_names = FALSE) 
+
+colnames(data) <- c('User_Rating_Cnt',str_c('J', c(1:100)))
+head(data, 5)
+```
+
+
+# Data Exploration
+The dataset is a matrix with dimensions 24,938 rows x 101 columns.  It contains ratings from 24,938 users who have rated between 15 and 35 jokes ranging from -10.00 to +10.00, with '99' corresponds to 'null' value.  One row represents one user, while the first column gives the number of jokes rated by that user. The next 100 columns give the ratings for jokes 01-100. As the dataset is relatively large, we will randomly select 10,000 rows from the original dataset for our studies below. The first 5 rows are displayed.
+
+```{r data exploration i, message=FALSE, warning=FALSE}
+set.seed(1)
+# data cleaning after randomly select 10,000 rows from the raw data
+ui_mtrx <- data %>%
+  .[sample(nrow(data),10000),] %>%
+  #add row number as User_ID
+  mutate(User_ID = row_number()) %>%
+  #convert value '99' to NA
+  gather(key = 'Joke', value = 'Rating', -User_ID,-User_Rating_Cnt) %>%
+  filter(Rating != 99) %>%
+  spread(key = 'Joke', value = 'Rating') 
+
+# remove old data to clean up memory
+rm(data)
+
+head(ui_mtrx,5)  #our original dataset for this project
+
+```
+
+After replacing the '99' values with 'NA', we got the summary statistics of the `User_Rating_Cnt` and `Rating` after eliminating the 'NA' values.  From the summary statistics shown below, we can see that the users have rated about 26.05 jokes in average with range (15,35) and the ratings are in the range of (-9.95, 10) with mean 0.2863.
+
+```{r data exploration ii, message=FALSE, warning=FALSE}
+ui_mtrx_long <- ui_mtrx %>%
+  gather(key = 'Joke', value = 'Rating', -User_ID, -User_Rating_Cnt, na.rm = TRUE)
+
+# summary statistics
+ui_mtrx_long %>% select(User_Rating_Cnt, Rating) %>% summary()
+```
+
+The histogram also shows the distributions of the ratings of our dataset.  It also shows the mode rating of the dataset as -0.29.
+
+```{r data exploration iii, message=FALSE, warning=FALSE}
+# Histogram
+mode <- ui_mtrx_long %>%
+  group_by(Rating) %>%
+  summarise(Count = n()) %>%
+  top_n(1) %>%
+  select(Rating) %>%
+  as.numeric()
+
+ui_mtrx_long %>%
+  ggplot(aes(x = Rating, col = ..count..)) +
+  geom_bar() +
+  labs(title="Distribution of Ratings of Original Dataset") +
+  theme(plot.title = element_text(hjust=0.5)) +
+  annotation_custom(grobTree(textGrob(str_c('<-- Mode = ', mode %>% as.character()), x= 0.5, y = 0.85, hjust = 0)))
+```
+
+
+# Handle the Missing Values
+As singular value decomposition (SVD) requires no missing values from the dataset, we will first handle the missing values with baseline predictors.
+
+By calculating the mean, user biases, and item biases, we can fill in the missing values with baseline predictors and have a full dataset. The first 5 rows are displayed.
+
+```{r baseline predictor i, message=FALSE, warning=FALSE}
+# create a duplicate dataset as template for baseline predictors
+ui_mtrx_bp <- ui_mtrx
+
+# mean of all non-null ratings
+mean_raw <- mean(ui_mtrx_long$Rating, na.rm = TRUE)
+# create a 10000x100 matrix of raw mean
+mean_raw_mtrx <-matrix(mean_raw,nrow = 10000, ncol = 100)
+
+# user biases
+user_bias_tb <- ui_mtrx_long %>%
+  group_by(User_ID) %>%
+  summarise(User_Bias = mean(Rating) - mean_raw)
+# create a 10000X100 matrix of user biases
+user_bias_mtrx <- replicate(100,user_bias_tb$User_Bias)
+
+# item biases
+item_bias_tb <- ui_mtrx_long %>%
+  group_by(Joke) %>%
+  summarise(Item_Bias = mean(Rating) - mean_raw)
+# create a 10000x100 matrix of item biases
+item_bias_mtrx <- t(replicate(10000,item_bias_tb$Item_Bias))
+
+# create a temporary base line predictor matrix
+temp_mtrx_bp <- pmax(pmin(mean_raw_mtrx + user_bias_mtrx + item_bias_mtrx,10),-10) %>%
+  data.frame()
+
+colnames(temp_mtrx_bp) <- colnames(ui_mtrx)[-(1:2)]
+
+temp_mtrx_bp <- temp_mtrx_bp %>%
+  cbind(ui_mtrx[c(1,2)]) %>%
+  select(User_Rating_Cnt,User_ID, everything())
+
+# fill in missing values
+for(i in 3:102){
+  vect_a <- ui_mtrx_bp[i] %>% unlist()
+  vect_b <- temp_mtrx_bp[i] %>% unlist()
+  ui_mtrx_bp[i] <- ifelse(is.na(vect_a),vect_b, vect_a)
+}
+
+
+head(ui_mtrx_bp, 5)
+```
+
+
+We have the summary statistics of ratings of our baseline predictors dataset as below.
+
+```{r baseline predictor ii, message=FALSE, warning=FALSE}
+ui_mtrx_bp_long <- ui_mtrx_bp %>%
+  gather(key = 'Joke', value = 'Rating', -User_ID, -User_Rating_Cnt, na.rm = TRUE)
+
+#Summary statistics
+ui_mtrx_bp_long %>% select(User_Rating_Cnt, Rating) %>% summary()
+```
+
+From the boxplots which showing the user ratings from the original dataset with NA values omitted and the new dataset with NA values being replaced by baseline predictors, we can see that the interquartile range of the new dataset has narrowed down relatively from the original dataset. Also, the distribution of the new dataset is more normal than the original dataset by looking at their histograms of user ratings.
+
+```{r baseline predictor iii, message=FALSE, warning=FALSE}
+#boxplots comparing
+par(mfrow = c(1,2))
+boxplot(ui_mtrx_long["Rating"], main="Original Ratings", col="lightyellow")
+boxplot(ui_mtrx_bp_long["Rating"], main="NA Ratings replaced \nby Baseline Predictors", col="lightblue")
+
+#histograms comparing
+par(mfrow = c(2,1))
+hist(ui_mtrx_long$Rating, main="Original Ratings", col="lightyellow")
+hist(ui_mtrx_bp_long$Rating, main="NA Ratings replaced by Baseline Predictors", col="lightblue")
+```
+
+
+# Singular Value Decomposition (SVD)
+The singular value decomposition (SVD) of an $m*n$ matrix $A$ is a factorization of the form $U \Sigma V^T$, i.e. $A = U \Sigma V^T$, where $U$ is an $m*r$ orthogonal matrix, $\Sigma$ is an $r*r$ diagonal matrix with the $\sigma_{ii}$ values in descending order, and $V$ is an $n*r$ orthogonal matrix, where $r \le min(m,n)$ is the rank of the original matrix $A$. In order to apply SVD to our dataset, we will first convert the dataset to matrix format.
+
+```{r SVD i, message=FALSE, warning=FALSE}
+#define a matrix
+ui_mtrx_bp_rr <- ui_mtrx_bp %>%
+  select(-User_Rating_Cnt, -User_ID) %>%
+  as.matrix()
+
+#get the rank of our matrix
+r <- qr(ui_mtrx_bp_rr)$rank
+print(str_c('The rank r of our matrix is: ', as.character(r)))
+```
+
+As the rank 100 equals to our number of columns, we have $m=10,000$ and $r=n=100$ for our matrix $A = U \Sigma V^T$, where $U$ is an $m*r$ orthogonal matrix, $\Sigma$ is an $n*n$ diagonal matrix with the $\sigma_{ii}$ values in descending order, and $V$ is an $n*n$ orthogonal matrix.
+
+We can then calculate the SVD using the `svd` function. The singular values $\sigma_{ii}$ are plotted in a scatterplot below, which shows that the singular values are in descending order.
+
+```{r SVD ii, message=FALSE, warning=FALSE}
+#calculate svd
+ui_mtrx_svd <- svd(ui_mtrx_bp_rr)
+
+#plot the singular values
+plot(ui_mtrx_svd$d, main="Singular Values", xlab=expression(paste("Component ", sigma)), ylab="Singular Value", pch=19, col='deeppink')
+
+```
+
+
+# Dimensionality Reduction
+
+## Find k
+From the dimensionality reduction introduced by Standford University [https://youtu.be/c7e-D2tmRE0], SVD gives the best low rank approximation matrix $B = USV^T$ from matrix $A$ by keeping 80% to 90% of the sum of the squares of the singular values ($\sum \sigma_{ii}^2$), where $S$ is a diagonal $r*r$ matrix with its diagonal values $s_{ii} = \sigma_{ii} (i=1...k)$ else $s_{ii}=0$, which implies the formula $$\frac {\sum_{i=1}^{k}\sigma_{ii}^2} {\sum_{i=1}^{r} \sigma_{ii}^2} \approx 0.9$$
+
+By calculation, the value k that keeps approximately 90% of the sum of the squares of the singular values is 31. The scatterplot below shows the ratios of the changing k to all squares of singular values.
+
+```{r dimensionality reduction i, message=FALSE, warning=FALSE}
+#find the sum of squares of all singular values
+sum_sq_sv_all <- sum(ui_mtrx_svd$d^2)
+
+#find the value k that satisfy the formula
+dim_red <- NULL
+k <- 0
+for (i in 1:length(ui_mtrx_svd$d)){
+  dim_red[i] <- ((sum(ui_mtrx_svd$d[1:i]^2))/sum_sq_sv_all)
+  if (((sum(ui_mtrx_svd$d[1:i]^2))/sum_sq_sv_all) >= 0.9 && k==0){
+    k=i
+  }
+}
+if (abs((sum(ui_mtrx_svd$d[1:k]^2))/sum_sq_sv_all-0.9)>abs((sum(ui_mtrx_svd$d[1:k-1]^2))/sum_sq_sv_all-0.9)){
+  k=k-1
+}
+print(str_c('The value k is: ', as.character(k)))
+
+
+#plot the ratio of the sum of the squares of the first k singular values over that of all singular values
+plot(dim_red, main="Ratio of Squares of Singular Values vs k", xlab="k", ylab="Ratio of k to all Squares of Singular Values", pch=19, col='deeppink')
+abline(h=0.9, v=k)
+```
+
+
+## Reduce Matrices' Dimensionality
+As we have the value $k=31$ by calculation, we will reduce the matrices' dimensionality of $A = U \Sigma V^T$ by crossing out the (k+1 and after) columns of $U$, the (k+1 and after) singular values of $\Sigma$, and the (k+1 and after) rows for $V^T$ to produce $B = USV^T$.
+
+```{r dimensionality reduction ii, message=FALSE, warning=FALSE}
+#reduce dimensionality of U
+u_k <- ui_mtrx_svd$u[,1:k]
+
+#reduce dimensionality of S
+s_k <- Diagonal(n=k, x=ui_mtrx_svd$d[1:k])
+
+#reduce dimensionality of V^T
+v_t_k <- t(ui_mtrx_svd$v)[1:k,]
+```
+
+
+## Best Low Rank Approximation
+From the above section, we used SVD and Dimensionality Reduction to find the best rank-k approximation $B = USV^T$ to $A$, with rank($B$)=k. In this part, we will generate the matrix $B$ using the matrices `u_k`, `s_k`, and `v_k`. The dimension of matrix $B$ should match the dimension of matrix $A$, which is 10,000 rows x 100 columns.
+
+
+
+```{r dimensionality reduction iii, message=FALSE, warning=FALSE}
+ui_mtrx_svd_approx <- u_k %*% s_k %*% v_t_k %>%
+  as.matrix() 
+
+# limit the range of ratings to [-10,10]
+ui_mtrx_svd_approx <- pmax(pmin(ui_mtrx_svd_approx,10),-10)
+
+dim(ui_mtrx_svd_approx)
+```
+
+Let's see some summary statistics and the distribution of the predicted matrix $B$ and compare them with our original dataset w/o NA and the dataset with NA replaced by baseline predictors.
+
+```{r dimensionality reduction iv, message=FALSE, warning=FALSE}
+ui_mtrx_svd_approx_long <- ui_mtrx_svd_approx %>%
+  data.frame() %>%
+  gather(key = 'Joke', value = 'Rating', na.rm = TRUE)
+
+#Summary statistics
+ui_mtrx_long %>% 
+  select(Rating) %>% 
+  summary() %>%
+  data.frame() %>%
+  select(Freq) %>%
+  separate(Freq,into = c('Metrics', 'Value'),':') %>%
+  cbind(ui_mtrx_bp_long %>% 
+          select(Rating) %>% 
+          summary() %>%
+          data.frame() %>%
+          select(Freq) %>%
+          separate(Freq,into = c('Metrics', 'Value'),':')) %>%
+  cbind(ui_mtrx_svd_approx_long %>% 
+          select(Rating) %>% 
+          summary() %>%
+          data.frame() %>%
+          select(Freq) %>%
+          separate(Freq,into = c('Metrics', 'Value'),':')) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Original Dataset' = 2, 'Dataset with Baseline Predictors' = 2, 'Predicted Matrix B' = 2)) %>%
+  add_header_above(c('Summary Statistics' = 6))
+```
+
+From the summary statistics and the boxplots below, it is obvious that the predictor matrix $B$'s interquartile range has narrowed down relatively from the previous two datasets. Also, the distribution of the new dataset is similar to the dataset with baseline predictors but more normal than it.
+
+```{r dimensionality reduction v, message=FALSE, warning=FALSE}
+#boxplots comparing
+par(mfrow = c(1,3))
+boxplot(ui_mtrx_long["Rating"], main="Original Ratings", col="lightyellow")
+boxplot(ui_mtrx_bp_long["Rating"], main="NA Ratings replaced \nby Baseline Predictors", col="lightblue")
+boxplot(ui_mtrx_svd_approx_long["Rating"], main="Predicted Matrix with \nSVD Dimensionality Reduction", col="deeppink")
+
+#histograms comparing
+par(mfrow = c(3,1))
+hist(ui_mtrx_long$Rating, main="Original Ratings", col="lightyellow")
+hist(ui_mtrx_bp_long$Rating, main="NA Ratings replaced by Baseline Predictors", col="lightblue")
+hist(ui_mtrx_svd_approx_long$Rating, main="Predicted Matrix with SVD Dimensionality Reduction", col="deeppink")
+```
+
+
+# SVD Accuracy Evaluation
+Finally, we compare the predicted matrix with SVD dimensionality reduction with our original dataset, the one with NA values.
+
+```{r SVD accuracy, message=FALSE, warning=FALSE}
+#original dataset
+ui_mtrx_rr <- ui_mtrx %>%
+  select(-User_Rating_Cnt, -User_ID) %>%
+  as.matrix() %>% 
+  as("realRatingMatrix")
+
+#SVD dataset
+ui_mtrx_svd_approx_rr <- ui_mtrx_svd_approx %>%
+  as.matrix() %>% 
+  as("realRatingMatrix")
+
+#SVD dataset accuracy
+SVD_acc <- calcPredictionAccuracy(ui_mtrx_svd_approx_rr, ui_mtrx_rr)
+
+SVD_acc_Metrics <- rbind('SVD_acc' = SVD_acc) %>%
+  data.frame() %>%
+  rownames_to_column('Model')
+
+SVD_acc_Metrics %>%
+  mutate_if(is.numeric, ~round(.,6)) %>%
+  mutate(RMSE = cell_spec(RMSE, bold  = ifelse(RMSE == min(RMSE),TRUE,FALSE)),
+         MSE = cell_spec(MSE, bold  = ifelse(MSE == min(MSE),TRUE,FALSE)),
+         MAE = cell_spec(MAE, bold  = ifelse(MAE == min(MAE),TRUE,FALSE))
+         ) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('SVD-Dimensionality-Reduction Model' = 4)) 
+```
+
+
+# Build Recommendation Models with UBCF and IBCF
+By splitting our original dataset into train and test datasets, we will implement the User-Based Collaborative Filtering (UBCF) and Item-Based Collaborative Filtering (IBCF) algorithms to the original dataset. We will also use different normalization techniques (centering and Z-score) and similarity measures (Cosine distance, Pearson correlation, and Euclidean distance).
+
+```{r data sampling, message=FALSE, warning=FALSE}
+ui_mtrx_split <- evaluationScheme(data=ui_mtrx_rr, method='cross-validation', k = 5, 
+                                  given=15, goodRating=0)
+
+ui_mtrx_train <- getData(ui_mtrx_split, 'train')
+ui_mtrx_test_known <- getData(ui_mtrx_split, 'known')
+ui_mtrx_test_unknown <- getData(ui_mtrx_split, 'unknown')
+```
+
+
+## User-Based Collaborative Filtering Models
+We will create 6 models of User-Based Collaborative Filtering algorithm by using the `Recommender` function from the `recommenderlab` package with two normalization techniques (center and Z-score) and three similarity measures (Cosine distance, Pearson correlation, and Euclidean distance).
+
+After restricting the rating boundary to (-10, 10), we calculate the accuracies of the predictions with the actual ratings given by users.  The result is sorted by RMSE in ascending order.  
+
+```{r UBCF, message=FALSE, warning=FALSE}
+#UBCF models
+model_UBCF_CC <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Cosine"))
+model_UBCF_CP <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Pearson"))
+model_UBCF_CE <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "center", method="Euclidean"))
+model_UBCF_ZC <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Cosine"))
+model_UBCF_ZP <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Pearson"))
+model_UBCF_ZE <- Recommender(data = ui_mtrx_train, method = 'UBCF', parameter = list(normalize = "Z-score", method="Euclidean"))
+
+suppress_rating <- function(x, min = -10, max = 10){
+  return(pmax(pmin(x, 10),-10))
+  }
+
+#predictions with boundaries set
+p_UBCF_CC <- predict(model_UBCF_CC, ui_mtrx_test_known, type='ratings')
+p_UBCF_CC@data@x <- pmax(pmin(p_UBCF_CC@data@x, 10),-10)
+
+p_UBCF_CP <- predict(model_UBCF_CP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CP@data@x <- pmax(pmin(p_UBCF_CP@data@x, 10),-10)
+
+p_UBCF_CE <- predict(model_UBCF_CE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_CE@data@x <- pmax(pmin(p_UBCF_CE@data@x, 10),-10)
+
+p_UBCF_ZC <- predict(model_UBCF_ZC, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZC@data@x <- pmax(pmin(p_UBCF_ZC@data@x, 10),-10)
+
+p_UBCF_ZP <- predict(model_UBCF_ZP, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZP@data@x <- pmax(pmin(p_UBCF_ZP@data@x, 10),-10)
+
+p_UBCF_ZE <- predict(model_UBCF_ZE, ui_mtrx_test_known, type='ratings') 
+p_UBCF_ZE@data@x <- pmax(pmin(p_UBCF_ZE@data@x, 10),-10)
+
+#accuracies
+UBCF_Model_Metrics <- rbind(
+  'UBCF_CC' = calcPredictionAccuracy(p_UBCF_CC, ui_mtrx_test_unknown),
+  'UBCF_CP' = calcPredictionAccuracy(p_UBCF_CP, ui_mtrx_test_unknown),
+  'UBCF_CE' = calcPredictionAccuracy(p_UBCF_CE, ui_mtrx_test_unknown),
+  'UBCF_ZC' = calcPredictionAccuracy(p_UBCF_ZC, ui_mtrx_test_unknown),
+  'UBCF_ZP' = calcPredictionAccuracy(p_UBCF_ZP, ui_mtrx_test_unknown),
+  'UBCF_ZE' = calcPredictionAccuracy(p_UBCF_ZE, ui_mtrx_test_unknown)
+) %>%
+  data.frame() %>%
+  rownames_to_column('Model') %>%
+  arrange(RMSE)
+
+UBCF_Model_Metrics %>%
+  mutate_if(is.numeric, ~round(.,6)) %>%
+  mutate(RMSE = cell_spec(RMSE, bold  = ifelse(RMSE == min(RMSE),TRUE,FALSE)),
+         MSE = cell_spec(MSE, bold  = ifelse(MSE == min(MSE),TRUE,FALSE)),
+         MAE = cell_spec(MAE, bold  = ifelse(MAE == min(MAE),TRUE,FALSE))
+         ) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Comparison of User-Based Collaborative Filtering Models' = 4)) 
+```
+
+
+## Item-Based Collaborative Filtering Models
+We will then create 6 models of Item-Based Collaborative Filtering algorithm with the same method: by using the `Recommender` function from the `recommenderlab` package with two normalization techniques (center and Z-score) and three similarity measures (Cosine distance, Pearson correlation, and Euclidean distance).
+
+After restricting the rating boundary to (-10, 10), we calculate the accuracies of the predictions with the actual ratings given by users.  The result is sorted by RMSE in ascending order.  
+
+```{r IBCF, message=FALSE, warning=FALSE}
+#IBCF models
+model_IBCF_CC <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Cosine"))
+
+model_IBCF_CP <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Pearson"))
+
+model_IBCF_CE <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "center", method="Euclidean"))
+
+model_IBCF_ZC <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Cosine"))
+
+model_IBCF_ZP <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Pearson"))
+
+model_IBCF_ZE <- Recommender(data = ui_mtrx_train, method = 'IBCF', parameter = list(normalize = "Z-score", method="Euclidean"))
+
+
+#predictions with boundaries set
+p_IBCF_CC <- predict(model_IBCF_CC, ui_mtrx_test_known, type='ratings')
+p_IBCF_CC@data@x <- pmax(pmin(p_IBCF_CC@data@x, 10),-10)
+
+p_IBCF_CP <- predict(model_IBCF_CP, ui_mtrx_test_known, type='ratings') 
+p_IBCF_CP@data@x <- pmax(pmin(p_IBCF_CP@data@x, 10),-10)
+
+p_IBCF_CE <- predict(model_IBCF_CE, ui_mtrx_test_known, type='ratings') 
+p_IBCF_CE@data@x <- pmax(pmin(p_IBCF_CE@data@x, 10),-10)
+
+p_IBCF_ZC <- predict(model_IBCF_ZC, ui_mtrx_test_known, type='ratings') 
+p_IBCF_ZC@data@x <- pmax(pmin(p_IBCF_ZC@data@x, 10),-10)
+
+p_IBCF_ZP <- predict(model_IBCF_ZP, ui_mtrx_test_known, type='ratings') 
+p_IBCF_ZP@data@x <- pmax(pmin(p_IBCF_ZP@data@x, 10),-10)
+
+p_IBCF_ZE <- predict(model_IBCF_ZE, ui_mtrx_test_known, type='ratings') 
+p_IBCF_ZE@data@x <- pmax(pmin(p_IBCF_ZE@data@x, 10),-10)
+
+
+#accuracies
+IBCF_Model_Metrics <- rbind(
+  'IBCF_CC' = calcPredictionAccuracy(p_IBCF_CC, ui_mtrx_test_unknown),
+  'IBCF_CP' = calcPredictionAccuracy(p_IBCF_CP, ui_mtrx_test_unknown),
+  'IBCF_CE' = calcPredictionAccuracy(p_IBCF_CE, ui_mtrx_test_unknown),
+  'IBCF_ZC' = calcPredictionAccuracy(p_IBCF_ZC, ui_mtrx_test_unknown),
+  'IBCF_ZP' = calcPredictionAccuracy(p_IBCF_ZP, ui_mtrx_test_unknown),
+  'IBCF_ZE' = calcPredictionAccuracy(p_IBCF_ZE, ui_mtrx_test_unknown)
+) %>%
+  data.frame() %>%
+  rownames_to_column('Model') %>%
+  arrange(RMSE)
+
+
+IBCF_Model_Metrics %>%
+  mutate_if(is.numeric, ~round(.,6)) %>%
+  mutate(RMSE = cell_spec(RMSE, bold  = ifelse(RMSE == min(RMSE),TRUE,FALSE)),
+         MSE = cell_spec(MSE, bold  = ifelse(MSE == min(MSE),TRUE,FALSE)),
+         MAE = cell_spec(MAE, bold  = ifelse(MAE == min(MAE),TRUE,FALSE))
+         ) %>%
+  kable(escape = FALSE) %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Comparison of Item-Based Collaborative Filtering Models' = 4))
+```
+
+
+# Summary
+The barplot below compares the accuracies between our SVD model, 6 UBCF models, and 6 IBCF models.  It is sorted by RMSE in ascending order. The lower the RMSE value, the better the performance of the model. Although the UBCF models generally performs better than the IBCF models, our SVD-dimensionality-reduction model (with NA values replaced by baseline predictors) still outperforms all those 12 models, which indicates that SVD-dimensionality-reduction recommender system  provides more accurate user rating predictions than collaborative filtering models.
+
+```{r summary}
+SVD_acc_Metrics %>%
+  rbind(UBCF_Model_Metrics) %>%
+  rbind(IBCF_Model_Metrics) %>%
+  select(Model, RMSE) %>%
+  ggplot(aes(x=reorder(Model, -RMSE), y=RMSE, fill=RMSE)) +
+  geom_text(aes(label=round(RMSE,4), hjust = 'left'))+
+  geom_bar(stat='identity') +
+  coord_flip()+
+  ylim(0,6)+
+  scale_fill_gradient(low = 'deeppink1', high = 'deeppink4') +
+  labs(title = 'RMSE Comparison of All Models',
+       x = 'MODEL', 
+       y = 'RMSE')
+```
+
+```{r}
+#clean up memory
+rm(list = ls())
+```
