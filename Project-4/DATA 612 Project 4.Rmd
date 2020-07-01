@@ -1,0 +1,373 @@
+---
+title: "DATA 612 Project 4 - Accuracy and Beyond"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "6/30/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Instruction
+In this assignment, we will work in a small group and choose a different dataset to work with from our previous projects.  We will compare the accuracy of at least two recommender system algorithms against our offline data, implement support for at least one business or user experience goal by increasing diversity, serendipity or novelty, and then compare and report the change in accuracy before and after the increase.
+
+
+# Introduction
+In this project, we will use a different dataset to implement at least two recommender system algorithms, such as the User-Based Collaborative Filtering (UBCF) model, Item-Based Collaborative Filtering (IBCF) model, singular value decomposition (SVD) model, and random model. We will then implement support by increasing the serendipity, and compare the change in the model accuracies before and after the serendipity increase. The dataset we will use for this project is `MovieLense`. We will introduce the dataset in detail below.
+
+
+# Load Packages
+```{r load package, message=FALSE, warning=FALSE}
+library(recommenderlab)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(gridExtra)
+library(rmdformats)
+library(formattable)
+library(scales)
+```
+
+# Read Data
+```{r read data, message=FALSE, warning=FALSE}
+set.seed(3)
+data(MovieLense)
+y<-as.matrix(MovieLense@data[1:10,1:100])
+y  %>% kable(caption = "Showing Part of the Dataset") %>% kable_styling("striped", full_width = TRUE)
+```
+
+
+# Data Exploration
+The dataset we will use for this project is `MovieLense`. This data is about movies. The table contains the ratings that the users give to movies, which was collected through the MovieLens website (movielens.umn.edu) from 943 users on 1664 movies during the seven-month period from September 19th, 1997 through April 22nd, 1998
+
+It is a 943 rows x 1664 columns rating matrix of class 'realRatingMatrix' with 99,392 ratings. Each row of `MovieLense` corresponds to a user, and each column corresponds to a movie.  There are more than 943 x 1664 = 1,500,000 combinations between a user and a movie. Therefore, storing the complete matrix would require more than 1,500,000 cells. However, not every user has watched every movie. Therefore, there are fewer then 100,000 ratings, and the matrix is sparse.  
+
+It is also included in our textbook, *Building a Recommendation System with R*, by Suresh K. Gorakala and Michele Usuelli.
+
+```{r data exploration i, message=FALSE, warning=FALSE}
+dim(MovieLense)
+
+table(MovieLense@data %>% as.vector()) %>%
+  data.frame() %>%
+  mutate(Pcnt = percent(Freq/sum(Freq))) %>%
+  rename(Rating = Var1) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped', 'bordered'), full_width = FALSE) %>%
+  add_header_above(c('Rating Frequency' = 3))
+```
+
+
+# Data Preparation
+As not every user has watched every movie, the dataset is large and sparse, which we may not use the whole dataset to build our models. Let's first take a look at the number of ratings per user.
+
+```{r data preparation i, message=FALSE, warning=FALSE}
+MovieLense %>%
+rowCounts() %>%
+  data.frame() %>%
+  rename(Rating_Per_User = '.') %>%
+    ggplot(aes(x=Rating_Per_User)) +
+    geom_histogram(color = 'grey', fill = 'deeppink4') +
+    ggtitle('Number of Rating Per User')
+```
+
+
+To build our recommendation models, we will select the most relevant data: users who have rated at least 50 movies and movies that have been rated at least 100 times.
+
+The plot shown below describes the distribution of the average rating per user (`Row_Mean`) from our filtered dataset.
+
+```{r data preparation ii, message=FALSE, warning=FALSE}
+rating_movie <- MovieLense[rowCounts(MovieLense) > 50,
+                             colCounts(MovieLense) > 100]
+rating_movie
+
+rating_movie %>%
+  rowMeans() %>%
+  data.frame() %>%
+  rename(Row_Mean = '.') %>%
+  ggplot(aes(x = Row_Mean)) +
+  geom_histogram(color = 'grey', fill = 'deeppink4') +
+  ggtitle("Distribution of the average rating per user")
+
+```
+
+
+# Building Recommendation Models
+By splitting the dataset into training dataset (80%) and testing dataset (20%), we will implement the User-Based Collaborative Filtering (UBCF) model, Item-Based Collaborative Filtering (IBCF) model, Singular Value Decomposition (SVD) model, and Random model to our datasets with different normalization techniques and similarity measures.
+
+```{r split datasets, message=FALSE, warning=FALSE}
+set.seed(3)
+eval_sets <- evaluationScheme(data = rating_movie, method = "split", train = 0.8, given = 15, goodRating = 3, k = 1)
+eval_sets
+```
+
+## UBCF Models
+We will evaluate three models of User-Based Collaborative Filtering (UBCF) algorithm by using the `recommenderlab` package with mean-centering normalization technique and three similarity measures (Pearson correlation, Euclidean distance and Cosine distance).
+
+```{r UBCF, message=FALSE, warning=FALSE}
+ubcf_models <- list(
+  ubcf_prs_center = list(name = "UBCF", param = list(method = "pearson", normalize = "center")),
+  ubcf_euc_center = list(name = "UBCF", param = list(method = "euclidean", normalize = "center")),
+  ubcf_cos_center = list(name = "UBCF", param = list(method = "cosine", normalize = "center"))
+)
+
+ubcf_eval_results <- evaluate(eval_sets, 
+                              method = ubcf_models, 
+                              n = seq(10, 100, 10)
+                              )
+```
+
+
+The results of the three UBCF models are plotted below in ROC curve and Precision-Recall.
+
+```{r UBCF_ROC, message=FALSE, warning=FALSE}
+plot(ubcf_eval_results, annotate = TRUE, legend="topleft")
+title("UBCF_ROC Curve")
+```
+
+```{r UBCF_PR, message=FALSE, warning=FALSE}
+plot(ubcf_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("UBCF_Precision-Recall")
+```
+
+
+## IBCF Models
+We will evaluate three models of Item-Based Collaborative Filtering (IBCF) algorithm by using the `recommenderlab` package with mean-centering normalization technique and three similarity measures (Pearson correlation, Euclidean distance and Cosine distance).
+
+```{r IBCF, message=FALSE, warning=FALSE}
+ibcf_models <- list(
+  ibcf_prs_center = list(name = "IBCF", param = list(method = "pearson", normalize = "center")),
+  ibcf_euc_center = list(name = "IBCF", param = list(method = "euclidean", normalize = "center")),
+  ibcf_cos_center = list(name = "IBCF", param = list(method = "cosine", normalize = "center"))
+)
+ibcf_eval_results <- evaluate(eval_sets, 
+                              method = ibcf_models, 
+                              n = seq(10, 100, 10)
+                              )
+```
+
+
+The results of the three IBCF models are plotted below in ROC curve and Precision-Recall.
+
+```{r IBCF_ROC, message=FALSE, warning=FALSE}
+plot(ibcf_eval_results, annotate = TRUE, legend="topleft")
+title("IBCF_ROC Curve")
+```
+
+```{r IBCF_PR, message=FALSE, warning=FALSE}
+plot(ibcf_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("IBCF_Precision-Recall")
+```
+
+
+## SVD Models
+We will evaluate two models of Singular Value Decomposition (SVD) algorithm by using the `recommenderlab` package with mean-centering normalization technique.
+
+```{r SVD, message=FALSE, warning=FALSE}
+svd_models <- list(
+  svd_center = list(name = "SVD", param = list(normalize = "center")),
+  svd_z = list(name = "SVD", param = list(normalize = "Z-score"))
+)
+svd_eval_results <- evaluate(x = eval_sets, 
+                                 method = svd_models, 
+                                 n = seq(10, 100, 10))
+```
+
+
+The results of the two SVD models are plotted below in ROC curve and Precision-Recall.
+
+```{r SVD_ROC, message=FALSE, warning=FALSE}
+plot(svd_eval_results, annotate = TRUE, legend="topleft")
+title("SVD_ROC Curve")
+```
+
+
+
+```{r SVD_PR, message=FALSE, warning=FALSE}
+plot(svd_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("SVD_Precision-Recall")
+```
+
+
+
+## Random Models
+We will evaluate three models by using the random algorithm from the `recommenderlab` package with mean-centering normalization technique and three similarity measures (Pearson correlation, Euclidean distance and Cosine distance).
+
+
+```{r random model, message=FALSE, warning=FALSE}
+random_models <- list(
+  random_prs_center = list(name = "RANDOM", param = list(method = "pearson", normalize = "center")),
+  random_euc_center = list(name = "RANDOM", param = list(method = "Euclidean", normalize = "center")),
+  random_cos_center = list(name = "RANDOM", param = list(method = "Cosine", normalize = "center"))
+)
+random_eval_results <- evaluate(x = eval_sets, 
+                              method = random_models, 
+                              n = seq(10, 100, 10)
+                              )
+```
+
+
+
+The results of the three random models are plotted below in ROC curve and Precision-Recall.
+
+```{r random_ROC, message=FALSE, warning=FALSE}
+plot(random_eval_results, annotate = TRUE, legend="topleft")
+title("Random ROC curve")
+```
+
+```{r random_PR, message=FALSE, warning=FALSE}
+plot(random_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("Random Precision-recall")
+```
+
+
+# Increasing Serendipity
+To add serendipity to our recommendations, we will add an element of chance to the model. We will create a hybrid recommendation model that based on a 20/80 weighting of the original algorithms in the previous steps with the RANDOM algorithm.
+
+```{r, message=FALSE, warning=FALSE}
+train <- getData(eval_sets, 'train')
+known <- getData(eval_sets, 'known')
+unknown <- getData(eval_sets, 'unknown')
+```
+
+
+## UBCF vs HYBRID
+`ubcf_prs_center` model is evaluated as the best model among all UBCF models mentioned above, therefore it is used to compare with the hybrid model.
+
+```{r, message=FALSE, warning=FALSE}
+# UBCF Model
+UBCF_train <- Recommender(getData(eval_sets, "train"), "IBCF", parameter = list(method = "pearson", normalize = "center"))
+
+# Random Model
+RANDOM_train <- Recommender(getData(eval_sets, "train"), "RANDOM")
+
+# Hybrid Model
+Hybrid_1_train <- HybridRecommender(
+    UBCF_train,
+    RANDOM_train,
+    weights = c(0.2, 0.8)
+)
+
+# Accuracy Metrics of UBCF Model
+UBCF_pred <- predict(UBCF_train,getData(eval_sets,'known'), type = 'ratings')
+UBCF_error <- calcPredictionAccuracy(UBCF_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Random Model
+RANDOM_pred <- predict(RANDOM_train,getData(eval_sets,'known'), type = 'ratings')
+RANDOM_error <- calcPredictionAccuracy(RANDOM_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Hybrid Model
+Hybrid_1_pred <- predict(Hybrid_1_train,getData(eval_sets,'known'), type = 'ratings')
+Hybrid_1_error <- calcPredictionAccuracy(Hybrid_1_pred, getData(eval_sets, "unknown"))
+
+rbind(UBCF_error, RANDOM_error, Hybrid_1_error) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('UBCF vs HYBRID'=4))
+```
+
+
+## ICBF vs HYBRID
+`ibcf_euc_center` model is evaluated as the best model among all IBCF models mentioned above, therefore it is used to compare with the hybrid model.
+
+```{r, message=FALSE, warning=FALSE}
+#IBCF Model
+IBCF_train <- Recommender(getData(eval_sets, "train"), "IBCF", parameter = list(method = "Euclidean", normalize = "center"))
+
+#Random Model
+RANDOM_train <- Recommender(getData(eval_sets, "train"), "RANDOM")
+
+#Hybrid Model
+Hybrid_2_train <- HybridRecommender(
+    IBCF_train,
+    RANDOM_train,
+    weights = c(0.2, 0.8)
+)
+
+# Accuracy Metrics of IBCF Model
+IBCF_pred <- predict(IBCF_train,getData(eval_sets,'known'), type = 'ratings')
+IBCF_error <- calcPredictionAccuracy(IBCF_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Random Model
+RANDOM_pred <- predict(RANDOM_train,getData(eval_sets,'known'), type = 'ratings')
+RANDOM_error <- calcPredictionAccuracy(RANDOM_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Hybrid Model
+Hybrid_2_pred <- predict(Hybrid_2_train,getData(eval_sets,'known'), type = 'ratings')
+Hybrid_2_error <- calcPredictionAccuracy(Hybrid_2_pred, getData(eval_sets, "unknown"))
+
+rbind(IBCF_error, RANDOM_error, Hybrid_2_error) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('IBCF vs HYBRID'=4))
+```
+
+
+
+## SVD vs HYBRID
+`svd_center` model is evaluated as the best model among all SVD models mentioned above, therefore it is used to compare with the hybrid model.
+
+```{r, message=FALSE, warning=FALSE}
+#SVD Model
+SVD_train <- Recommender(getData(eval_sets, "train"), "SVD", parameter = list(normalize = "Center"))
+
+#Random Model
+RANDOM_train <- Recommender(getData(eval_sets, "train"), "RANDOM")
+
+#Hybrid Model
+Hybrid_3_train <- HybridRecommender(
+    SVD_train,
+    RANDOM_train,
+    weights = c(0.2, 0.8)
+)
+
+# Accuracy Metrics of SVD Model
+SVD_pred <- predict(SVD_train,getData(eval_sets,'known'), type = 'ratings')
+SVD_error <- calcPredictionAccuracy(SVD_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Random Model
+RANDOM_pred <- predict(RANDOM_train,getData(eval_sets,'known'), type = 'ratings')
+RANDOM_error <- calcPredictionAccuracy(RANDOM_pred, getData(eval_sets, "unknown"))
+
+# Accuracy Metrics of Hybrid Model
+Hybrid_3_pred <- predict(Hybrid_3_train,getData(eval_sets,'known'), type = 'ratings')
+Hybrid_3_error <- calcPredictionAccuracy(Hybrid_3_pred, getData(eval_sets, "unknown"))
+
+rbind(SVD_error, RANDOM_error, Hybrid_3_error) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('SVD vs HYBRID'=4))
+```
+
+
+# Conclusion
+From the three tables of performance metrics for UBCF, IBCF and SVD models vs Hybrid models, we can see that the prediction accuracies of all three Hybrid recommendation models fall between its original model and random model.  Based on the 20/80 weighting of the original algorithms and the random algorithm, the RMSE of the Hybrid model is a little bit weakened as all random models have higher RMSE than their original models.
+
+Recommender systems can be evaluated offline and online. The main difference between offline and online datasets is the way of accuracy testing. For offline evaluation, it is just like what we did with the `MovieLense` dataset above to test the effectiveness of the system by calculating RMSE and other metrics. When we use offline dataset, the recommendation will be tested according to the "unknown" part of the test dataset. However, when our recommender system becomes online, i.e. online evaluation is possible, the "unknown" part will then be a new registered user or a live user that is looking for recommendations. We will evaluate users' click-through rate and conversion rate in the online recommender system. Click-through rate is a metric shown as a percentage that measures how many people clicked on the item, while conversion rate is a metric shown as a percentage that displays how many users complete an action on the item out of the total number of visitors. We can also create a user preference survey in the user profile section for users to fill in their preferences on the items, such as movie genres, actor/actress, location, etc. Adding the two metrics and user-preference design to our online recommender systems can provide more user-item information to the analysis and therefore can further improve the model accuracy and produce more interesting recommendations.
