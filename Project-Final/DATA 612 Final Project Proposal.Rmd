@@ -1,0 +1,56 @@
+---
+title: "DATA 612 Final Project Proposal"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "7/02/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Project Goal 
+In this final project, we will work in a small group to build out a recommender system using a large dataset containing 1M+ ratings, or 10k+ users with 10k+ items.  Using one of the datasets we have already worked with is allowed by adding a unique element or incorporate additional data, such as explicit features scraped from another source.  The overall goal will be to produce quality recommendations by extracting insights from a large dataset using distributed computing method or by effectively applying one of the more advanced mathematical techniques we have covered.  This project should showcase some of the concepts that we have learned in this course.  The deliverable should be an RMarkdown file or a Jupyter notebook, and posted to GitHub or RPubs.com. A five-minute presentation is required during the final meetup or recording is required.
+
+
+# Dataset Introduction
+In this project, we are going to implement a recommender system using different algorithms for movie recommendations by using the MovieLens dataset, which can be found at  [https://grouplens.org/datasets/movielens/latest/] or [http://grouplens.org/datasets/].  This MovieLens dataset is different from the MovieLense dataset we used in project 4.  The MovieLens dataset we are going to use for this project contains 100,836 ratings and 3,683 tag applications across 9,742 movies.  These data were created by 610 users between March 29, 1996 and September 24, 2018, and generated as a dataset on September 26, 2018. All users had rated at least 20 movies with no demographic information.  Each user is represented by an ID and no other information is provided.  All ratings are made on a 5-star scale with half-star increments (0.5 star - 5.0 stars).  Movie genres information is also included in this dataset.  All the data are contained in multiple comma-separated values (csv) files.  
+
+# Design Steps
+Step 1: We will first import the dataset from GitHub, clean the datasets, and perform data exploration. Statistical exploration such as distribution of ratings will be included.  
+
+Step 2: Transform and/or combine the datasets for further analysis. Sampling the dataset if necessary before splitting it into training and testing sets.
+
+Step 3: We will introduce each of the models briefly and build them using User-Based Collaborative Filtering (UBCF), Item-Based Collaborative Filtering (IBCF), Singular Value Decomposition (SVD), and hybrid-model algorithms with different parameters (e.g. similarity methods, normalization techniques).
+
+Step 4: Evaluate the model performance and accuracy using the metrics RMSE, MAE, MSE, ROC Curve/AUC, and Precision-Recall, which will help us finalizing our recommender system and to build up a final product using the model with best performance.
+
+# Reference
+MovieLens Dataset: https://grouplens.org/datasets/movielens/latest/ or http://grouplens.org/datasets/
