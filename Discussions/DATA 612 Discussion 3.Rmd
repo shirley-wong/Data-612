@@ -1,0 +1,63 @@
+---
+title: "DATA 612 Discussion 3"
+author: "Sin Ying Wong"
+date: "7/12/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Instruction
+As more systems and sectors are driven by predictive analytics, there is increasing awareness of the possibility and pitfalls of algorithmic discrimination. In what ways do you think Recommender Systems reinforce human bias? Reflecting on the techniques we have covered, do you think recommender systems reinforce or help to prevent unethical targeting or customer segmentation?  Please provide one or more examples to support your arguments.
+
+A few resources:
+
+- Evan Estola (2016): When Recommendations Systems Go Bad; MLconf SEA 2016 [https://www.youtube.com/watch?v=MqoRzNhrTnQ]   
+
+- Rishabh Jain (2016): When Recommendation Systems Go Bad [http://cds.nyu.edu/recommendation-systems-go-bad-%E2%80%A8/]  
+
+- Moritz Hardt, Eric Price, Nathan Srebro (2016):  Equality of Opportunity in Supervised Learning [https://arxiv.org/pdf/1610.02413.pdf]  
+
+Please complete the research discussion assignment in a Jupyter or R Markdown notebook. You should post the GitHub link to your research in a new discussion thread.
+
+
+# Response
+Recommender system is one of many types of systems that is driven by predictive analytics.  It is being applied to many applications in our daily lives, shopping sites such as Amazon or retailers, music platforms such as Spotify, and video platforms such as YouTube and Netflix.  Recommender system takes in our search engine history, browsing history, clicks, and likes.  Our habits or preferences may sometimes reinforce human bias due to algorithm discrimination.
+
+Collaborative Filtering method generates recommendations to users by studying users' history and users' ratings, which would be more easily causing human bias compare to other types of recommender systems.  Collaborative Filtering suggest users with similar items, such as movies or songs, based on users' browsing history and likes.  If one listened to an album of a singer, the system is highly possible to recommend the user other albums of the same singer and singers with similar styles.  After clicking on the recommendations a couple of times, the user's recommendation page would be full of songs or videos that is of the same style, unless the user searches for and clicks on some other different style songs or videos to break the loop.  As the algorithm is set to look for similar items to recommend, the system is clearly somewhat reinforcing human bias.
+
+Back in 2016, when Microsoft registered a Twitter account for its original chatbot Tay, they might not have expected the outcome of algorithmic discrimination.  Tay was designed to simulate tweets of a teenage girl from interactions with Twitter users around the world.  However, in less than 24 hours of being online, Tay twitted "Hitler was right I hate the jews".  It is obvious that filtering from many human tweets online did not solve the issue of human bias.  Recommender systems do reinforce human bias in some ways, even that human bias might not be on purpose.
+
+
+# Reference
+*The Hidden Dangers in Algorithmic Decision Making*  
+[https://towardsdatascience.com/the-hidden-dangers-in-algorithmic-decision-making-27722d716a49]
