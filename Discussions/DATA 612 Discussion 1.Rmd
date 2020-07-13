@@ -1,0 +1,80 @@
+---
+title: "DATA 612 Discussion 1"
+author: "Sin Ying Wong"
+date: "7/10/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Part 1 Instruction
+Now that we have covered basic techniques for recommender systems, choose one commercial recommender and describe how you think it works (content-based, collaborative filtering, etc). Does the technique deliver a good experience or are the recommendations off-target?
+
+You may also choose one of the three non-personalized recommenders (below) we went over in class and describe the technique and which of the three you prefer to use.
+
+1. Metacritic:  How We Create the Metascore Magic [http://www.metacritic.com/about-metascores]  
+2. Rotten Tomatoes: About Rotten Tomatoes [https://www.rottentomatoes.com/about/]  
+3. IMDB: FAQ for IMDb Ratings [http://imdb.to/%202ljPH90]  
+
+Please complete the research discussion assignment in a Jupyter or R Markdown notebook. You should post the GitHub link to your research in a new discussion thread.
+
+
+# Part 1 Response
+YouTube is one of many platforms that provides users varieties of videos to watch and allows users to upload their own videos.  There are movies, music videos, song covers, tv shows, cartoons, etc.  Every user's click or like on a video and watch history becomes part of the data in YouTube's database.  By having millions of users from all around the world, YouTube gathers the data and provide recommendations to its users by videos' contents and by users' preferences.
+
+First, YouTube recommends videos by 8 categories, Trending, Music, Gaming, News, Movies & Shows, Fashion & Beauty, Learning, and Live.  YouTube collects the most popular videos among each category and recommend them to all users.
+
+Second, content-based recommendations.  By clicking one video to watch, YouTube then automatically picks the top 5 videos that are the most similar and popular to recommend to the user.  Most users found those recommended videos interesting as they match with the user's interest on the first video.
+
+Third, user-based recommendations.  By collecting users' history, YouTube compares each user's record and provide recommendations of one user to other users with similar history.  Videos recommended to a user on YouTube marked with this sentense, "People who watched this video also watched...", is an example of user-based recommendations.
+
+Being a long-term YouTube user, I always find YouTube's recommendations amazing and worth watching.  The recommended videos match with my interest, such as cats, cooking, and beauty. It successfully reduces my time in searching for what I like and filtering out the videos that may bore me.
+
+
+# Part 2 Instruction
+Attacks on Recommender System
+
+Read the article below and consider how to handle attacks on recommender systems. Can you think of a similar example where a collective effort to alter the workings of content recommendations have been successful? How would you design a system to prevent this kind of abuse?
+
+Travis M. Andrews, The Washington Post (2017): Wisdom of the crowd? IMDb users gang up on Christian Bale’s new movie before it even opens. [https://www.washingtonpost.com/news/morning-mix/wp/2017/04/19/wisdom-of-the-crowd-imdb-users-gang-up-on-the-promise-before-it-even-opens/]
+
+
+# Part 2 Response
+Similar examples are the movies Star Wars: The Last Jedi and Black Panther.  These two movies faced serious review-bomb because they implicitly or explicitly critiqued racism and sexism.  
+
+To prevent this kind of abuse of the recommender system, we can first filter out the spam reviews.  Those only rated with stars and with no words or comments can be considered spam reviews.  There reviews are not informative and do not provide the reason why the user did not like it.  We can also remove the reviews with offensive language or conflict of interests.  Reviews being personal or with confliction may not be related to the user's experience.  Facebook's comment section is also implementing this method to show the most meaningful comments and hiding those less, such as tagging other users or with only emojis.
+
+Besides filtering, another useful technique is to add weights to reviews.  A weighting formula to calculate the star ratings can be taken into consideration.  Meaningful and informative reviews can weight more while the less informative reviews can weight less to lower the influences of possible fake reviews. 
+
+
+# Reference
+*How movie sites are dealing with review-bombing trolls* [https://www.theverge.com/2019/3/7/18254548/film-review-sites-captain-marvel-bombing-changes-rotten-tomatoes-letterboxd]

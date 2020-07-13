@@ -1,0 +1,53 @@
+---
+title: "DATA 612 Discussion 2"
+author: "Sin Ying Wong"
+date: "7/10/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Instruction
+For this discussion item, please watch the following talk and summarize what you found to be the most important or interesting points. The first half will cover some of the mathematical techniques covered in this unit's reading and the second half some of the data management challenges in an industrial-scale recommendation system.
+
+Music Recommendations at Scale with Spark - Christopher Johnson (Spotify) [http://www.youtube.com/watch?v=3LBgiFch4_g]
+
+Please complete the research discussion assignment in a Jupyter or R Markdown notebook. You should post the GitHub link to your research in a new discussion thread.
+
+# Response
+Spotify, a platform which has a large catalogue with over 40 million songs, uses mainly collaborative filtering for its recommender system.  Spotify has four different features, Discover, Radio, Related Artists, and Now Playing.  Discover feature provides personalized recommendations according to what you are listening to, Radio feature provides recommendations on similar musics from that Radio, and Related Artists feature provides recommendations on other similar artists.
+
+Spotify uses audio content, metadata, text analysis, and mainly collaborative filtering on their recommender system.  Collaborative Filtering is a technique that can filter out items that a user might like on the ratings of similar users and recommend it.  Instead of explicit matrix factorization, Spotify uses implicit matrix factorization method on their recommender system as Spotify uses implicit data.  They implicitly infer what users like based on what they are listening to.  First scale the ratings using binary labels with 1 = streamed and 0 = never streamed.  Then minizing weighted RMSE using a function of total number of times of streams as weights.  And finally they use Alternating Least Square method to alternate back and forth between two lower-dimensional user and movie matrices, by fixing Song matrix and solve User matrix, and vice versa alternatively.  The result will come up when a local convergence takes place.
+
+Spotify has once used Hadoop to work on its recommender system back in 2009, but when more users and more songs joined the database, Spotify had difficulties for the algorithm to perform, which then brought in Spark in 2014.  Spark works better and faster than Hadoop when the database is extremely large by saving the time and memory from reading data at every iteration.  Spotify loads the ratings matrix into memory and cache it instead of rereading it at every iteration.  Spotify breaks the user-item database into many blocks and broadcast them, then shuffle the vectors around only to those are related, which saves lots of time and memory.  This method is called full gridify.  Although the time of full gridify (3.5hrs) is more than the half gridify method (1.5hrs), when the number of users or the number of items are extremely large, the algorithm may break.  The Spark full gridify method still works much better the Hadoop (10hrs) with 4 million uses and 500k artists.
+
+A note is that, during this study, Spark cannot run the recommender system with Spotify's full dataset with 40M users and 20M songs.  It would be another challenge to all experts in this field.
