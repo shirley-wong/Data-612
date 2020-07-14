@@ -1,0 +1,62 @@
+---
+title: "DATA 612 Discussion 4"
+author: "Sin Ying Wong"
+date: "7/12/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Instruction
+Mitigating the Harm of Recommender Systems
+
+Read one or more of the articles below and consider how to counter the radicalizing effects of recommender systems or ways to prevent algorithmic discrimination.
+
+- Renee Diresta, Wired.com (2018): Up Next: A Better Recommendation System [https://www.wired.com/story/creating-ethical-recommendation-engines/]   
+
+- Zeynep Tufekci, The New York Times (2018): YouTube, the Great Radicalizer [https://www.nytimes.com/2018/03/10/opinion/sunday/youtube-politics-radical.html]  
+
+- Sanjay Krishnan, Jay Patel, Michael J. Franklin, Ken Goldberg (n/a): Social Influence Bias in Recommender Systems: A Methodology for Learning, Analyzing, and Mitigating Bias in Ratings [https://goldberg.berkeley.edu/pubs/sanjay-recsys-v10.pdf]  
+
+Please complete the research discussion assignment in a Jupyter or R Markdown notebook. You should post the GitHub link to your research in a new discussion thread.
+
+
+# Response
+We have studied some examples of recommender systems reinforcing human bias and causing algorithm discrimination in our Discussion#3.  While recommender systems take in user's every move, browsing history and likes,  they reinforce the user bias on certain content by recommending similar items to the user.  For example, the first and second article mentioned that Facebook Groups nudged people toward conspirational content, Twitter recommends similar users if the user follows one ISIS sympathizer, and YouTube recommends leftish videos to a user if the user watched his/her first one, while YouTube recommends rightish videos to another user if that user watched one rightish video.  The above examples have shown that these recommender systems are seriously biased with what they recommend based on the item the user consumed.  The systems don't actually understand the content of what they recommended.  This phenomenon is definitely not wanted and that the recommender systems should reduce such effects and prevent it from happening.
+
+Companies can first ask users to choose some (maybe 5, or even 10+) features that interest them, and recommends one or two items per feature to users to make sure there is enough diversification among the recommendations.  For example, if a user watched an action movie, we can recommend him/her with another action movie, one talk show of the actors and actresses, one music video or soundtrack of that movie, news about that movie, and an informative video about how the movie was filmed or about the visual effects of post-production.
+
+Second, just like the way we can choose not to see some ads on Facebook, companies should allow users to edit the recommendations given to them by removing those they do not want or ask users to rate the recommendations one by one.  I was once asked to rate a recommended video on YouTube and it helped to adjust the future recommendations.
+
+Adjusting the algorithm can also help.  As mentioned in the first article, Google has a project underway that when users search for terrorist videos on YouTube, instead of suggesting similar contents, the system will do the opposite to provide recommendations on non-violent content to de-radicalize them.  This advanced recommender system can help to build up a better community with less violence.  Adjusting the algorithm of recommender systems with goodwill can also reduce human bias.
+
+From what has been discussed above, to counter the radicalizing effects of recommender systems and to prevent algorithmic discrimination, recommender systems have to filter the bad elements and to provide more varieties of recommendations to users instead of only suggesting highly similar items.  
