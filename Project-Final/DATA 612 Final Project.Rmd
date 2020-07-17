@@ -1,0 +1,591 @@
+---
+title: "DATA 612 Final Project"
+author: "Sin Ying Wong, Zhi Ying Chen, Fan Xu"
+date: "7/15/2020"
+#runtime: shiny
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+# Project Goal
+The goal for the final project is to build out a recommender system using a large dataset (e.g. 1M+ ratings or 10k+ users, 10k+ items). If you would like to use one of the datasets you have already worked with, you should add a uniqle element or incorporate additional data. The overall goal, however, will be to produce quality recommendations by extracting insights fom a large dataset. You may do so using Spark, or another distributed computing method, OR by effectively applying one of the more advanced mathematical techniques we have covered. There is no preference for one over the other, as long as your recommender works! Make a five-minute presentation of your system in our final meetup on Thursday.
+
+
+# Introduction
+In this project, we are going to build out a recommender system using different algorithms for movie recommendations by using `MovieLens` datasets, which can be found at  [https://grouplens.org/datasets/movielens/latest/] or [http://grouplens.org/datasets/].  This `MovieLens` dataset is different from the `MovieLense` dataset we used in project 4.  We will implement User-Based Collaborative Filtering (UBCF) model, Item-Based Collaborative Filtering (IBCF) model, singular value decomposition (SVD) model, alternating least square (ALS) model, and Spark ALS model to our datasets and compare their performance.
+
+
+## Note
+To develop an efficient program of this project in PC environment but yet to effectively demonstrate building recommender systems using R studio, we will be covering two MovieLens datasets.  A relatively smaller MovieLens dataset of 100k+ observations will be used when building recommender systems using the package `Recommenderlab` in the first section. However to meet the size requirement of data in this project, a larger MovieLens dataset with 27M+ ratings that is shrinked to around 12,000 users and 12,000 movies will be used when building a recommender system using `sparklyr` in the second section.
+
+
+# Load Library
+```{r load package, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sparklyr)
+library(recommenderlab)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(gplots)
+library(shiny)
+set.seed(0)
+```
+
+
+# Build Model in RecommenderLab
+
+## Import Small MovieLens Dataset
+
+### Read data from CSV
+
+```{r read data 1}
+movie <- read.csv("https://raw.githubusercontent.com/shirley-wong/Data-612/master/Project-Final/ml-latest-small/movies.csv")
+ratings <- read.csv("https://raw.githubusercontent.com/shirley-wong/Data-612/master/Project-Final/ml-latest-small/ratings.csv")
+```
+
+
+## Data Exploration
+The `MovieLens` dataset we are going to use for the this section contains 100,836 ratings and 3,683 tag applications across 9,742 movies.  These data were created by 610 users between March 29, 1996 and September 24, 2018, and generated as a dataset on September 26, 2018. All users had rated at least 20 movies.  Each user is represented by an ID and no other information is provided.  All ratings are made on a 5-star scale with half-star increments (0.5 star - 5.0 stars).  From the explorations below, this dataset is quite sparse.
+
+
+### Data: Ratings
+Here is a glimpse of the `ratings` dataset.
+
+We can take a look at the `ratings` dataset in both long format and wide format below.
+
+```{r data exploration 1, fig.cap="ratings in long format"}
+head(ratings, 5)
+```
+
+
+```{r data exploration 2}
+glimpse(ratings)
+```
+
+
+```{r data exploration 3, fig.cap="ratings in wide format"}
+ratings %>% 
+  select(userId, movieId, rating) %>%
+  spread(key = movieId, value = rating) %>%
+  head(10)
+```
+  
+  
+The dataset is very sparse as observed from the heapmap of a subset of the dataset shown below.
+```{r heatmap, fig.cap="heatmap of partial dataset"}
+ratings %>% 
+  select(userId, movieId, rating) %>%
+  spread(key = movieId, value = rating) %>%
+  filter(userId %in% c(1:50)) %>%
+  select(c(1:50)) %>%
+  column_to_rownames('userId') %>%
+  as.matrix() %>%
+  heatmap.2(trace = 'none',
+            dendrogram = 'none',
+            density.info = 'none',
+            Rowv = FALSE,
+            Colv = FALSE,
+            col = colorRampPalette(c('grey','deeppink4'))(n=299))
+```
+
+
+In this dataset, users rated at least 20 movies. Most of them rated less than 60 movies.
+```{r histogram 1, message=FALSE, warning=FALSE}
+ratingmat <- ratings %>% 
+  select(userId, movieId, rating) %>%
+  spread(key = movieId, value = rating) %>%
+  select(-userId) %>%
+  as.matrix() %>%
+  as('realRatingMatrix')
+
+ratingmat %>%
+  rowCounts() %>%
+  data.frame(Row_Count = .) %>%
+  ggplot(aes(x=Row_Count)) +
+  geom_histogram(fill = 'deeppink4', color = 'grey', bins = 50) +
+  #geom_text(stat= 'count', vjust=-0.5)+
+  scale_x_continuous(limits = c(0,500),breaks = seq(0,500,20)) +
+  labs(title = 'Histogram: Number of Ratings per User')
+```
+
+Most movies are rated by no more than 5 users.
+```{r histogram 2, message=FALSE, warning=FALSE}
+ratingmat %>%
+  colCounts() %>%
+  data.frame(Col_Count = .) %>%
+  ggplot(aes(x=Col_Count)) +
+  geom_histogram(fill = 'deeppink4', color = 'grey', bins = 50) +
+  #geom_text(stat= 'count', vjust=-0.5)+
+  scale_x_continuous(limits = c(0,50),breaks = seq(0,50,5)) +
+  labs(title = "Histogram: Number of Ratings per Movie")
+
+#remove local variables, clear space for the downstream process
+#rm(movies, ratings)
+```
+
+
+### Data: Movie
+Here is a glimpse of the `movie` dataset.  
+
+It contains movie IDs, movie names and genres.
+```{r data exploration 4}
+head(movie)
+```
+
+```{r data exploration 5}
+glimpse(movie)
+```
+
+
+### User Similarity
+We can see the similarity between users by looking at the heatmap. White color represents no data.
+
+```{r user similarity}
+similarity_users <- similarity(ratingmat[1:25, ], 
+                               method = "pearson", 
+                               which = "users")
+
+image(as.matrix(similarity_users), main = "User Similarity")
+```
+
+
+### Item Similarity
+We can see the similarity between items by looking at the heatmap. White color represents no data.
+```{r item similarity}
+similarity_items <- similarity(ratingmat[, 1:25], method =
+                                 "pearson", which = "items")
+image(as.matrix(similarity_items), main = "Item Similarity")
+```
+
+
+## Select Sample Data
+Select data that has rowcount > 50 and colcount > 100 as our sample dataset.
+
+```{r sample data}
+ratings_movies <- ratingmat[rowCounts(ratingmat) > 50,
+                             colCounts(ratingmat) > 100]
+```
+
+This is a non-normalized heatmap of our sample dataset at quantile 0.95.
+```{r sample heatmap 1}
+min_movies <- quantile(rowCounts(ratings_movies), 0.95)
+min_users <- quantile(colCounts(ratings_movies), 0.95)
+
+image(ratingmat[rowCounts(ratingmat) > min_movies,
+colCounts(ratingmat) > min_users], main = "Non-Normalized Heatmap")
+```
+
+This is a normalized heatmap of our sample dataset at quantile 0.95.
+```{r sample heatmap 2}
+rating_movie_normalize <- normalize(ratings_movies)
+
+min_movies <- quantile(rowCounts(rating_movie_normalize), 0.95)
+min_users <- quantile(colCounts(rating_movie_normalize), 0.95)
+
+image(rating_movie_normalize[rowCounts(rating_movie_normalize) > min_movies,
+colCounts(rating_movie_normalize) > min_users], main = "Normalized Heatmap")
+```
+
+
+## Build Models
+We are going to build models using the library `RecommenderLab` with different algorithms.  We will implement User-Based Collaborative Filtering (UBCF) model, Item-Based Collaborative Filtering (IBCF) model, singular value decomposition (SVD) model and alternating least square (ALS) model, and compare their performance.
+
+### Train-Test Split
+```{r train test split recommenderlab, message=FALSE, warning=FALSE}
+eval_sets <- evaluationScheme(data = ratings_movies, method = "split", train = 0.8, given = 4, goodRating = 3, k = 1)
+```
+
+### UBCF Models
+We will evaluate three models of User-Based Collaborative Filtering (UBCF) algorithm by using the `recommenderlab` package with mean-centering normalization technique and three similarity measures (Pearson correlation, Euclidean distance and Cosine distance).
+
+```{r ubcf recommenderlab, message=FALSE, warning=FALSE}
+ubcf_models <- list(
+  ubcf_prs_center = list(name = "UBCF", param = list(method = "pearson", normalize = "center")),
+  ubcf_euc_center = list(name = "UBCF", param = list(method = "euclidean", normalize = "center")),
+  ubcf_cos_center = list(name = "UBCF", param = list(method = "cosine", normalize = "center"))
+)
+
+ubcf_eval_results <- evaluate(eval_sets, 
+                              method = ubcf_models, 
+                              n = seq(10, 100, 10)
+                              )
+```
+
+
+The results of the three UBCF models are plotted below in ROC curve and Precision-Recall.
+
+UBCF model with Pearson correlation performs the best among the three models.
+
+```{r ubcf roc}
+plot(ubcf_eval_results, annotate = TRUE, legend="topleft")
+title("UBCF_ROC Curve")
+```
+
+```{r ubcf PR}
+plot(ubcf_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("UBCF_Precision-Recall")
+```
+
+
+### IBCF Models
+We will evaluate three models of Item-Based Collaborative Filtering (IBCF) algorithm by using the `recommenderlab` package with mean-centering normalization technique and three similarity measures (Pearson correlation, Euclidean distance and Cosine distance).
+
+```{r ibcf recommenderlab, message=FALSE, warning=FALSE}
+ibcf_models <- list(
+  ibcf_prs_center = list(name = "IBCF", param = list(method = "pearson", normalize = "center")),
+  ibcf_euc_center = list(name = "IBCF", param = list(method = "euclidean", normalize = "center")),
+  ibcf_cos_center = list(name = "IBCF", param = list(method = "cosine", normalize = "center")),
+  ibcf_cos_NULL = list(name = "IBCF", param = list(method = "cosine", normalize = NULL))
+)
+ibcf_eval_results <- evaluate(eval_sets, 
+                              method = ibcf_models, 
+                              n = seq(10, 100, 10)
+                              )
+```
+
+
+The results of the three IBCF models are plotted below in ROC curve and Precision-Recall.
+
+IBCF model with Euclidean distance performs the best among the three models.
+
+```{r IBCF_ROC, message=FALSE, warning=FALSE}
+plot(ibcf_eval_results, annotate = TRUE, legend="topleft")
+title("IBCF_ROC Curve")
+```
+
+```{r IBCF_PR, message=FALSE, warning=FALSE}
+plot(ibcf_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("IBCF_Precision-Recall")
+```
+
+### SVD Models
+We will evaluate three models of Singular Value Decomposition (SVD) algorithm by using the `recommenderlab` package with non-normalization, mean-centering normalization, z-score normalization technique.
+
+```{r SVD, message=FALSE, warning=FALSE}
+svd_models <- list(
+  svd_center = list(name = "SVD", param = list(normalize = "center")),
+  svd_z = list(name = "SVD", param = list(normalize = "Z-score")),
+  svd = list(name = 'SVD', param = list(normalize = NULL))
+)
+svd_eval_results <- evaluate(x = eval_sets, 
+                                 method = svd_models, 
+                                 n = seq(10, 100, 10))
+```
+
+The results of the three SVD models are plotted below in ROC curve and Precision-Recall.
+
+SVD model without normalization performs the best among the three models.
+
+```{r SVD_ROC, message=FALSE, warning=FALSE}
+plot(svd_eval_results, annotate = TRUE, legend="topleft")
+title("SVD_ROC Curve")
+```
+
+```{r SVD_PR, message=FALSE, warning=FALSE}
+plot(svd_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("SVD_Precision-Recall")
+```
+
+### ALS Models
+We will evaluate three models of alternating least square (ALS) algorithm by using the `recommenderlab` package with non-normalization, mean-centering normalization, z-score normalization technique.
+
+```{r als, message=FALSE, warning=FALSE}
+als_models <- list(
+  als_center = list(name = "ALS", param = list(normalize = "center")),
+  als_z = list(name = "ALS", param = list(normalize = "Z-score")),
+  als = list(name = 'ALS', param = list(normalize = NULL))
+)
+als_eval_results <- evaluate(x = eval_sets, 
+                                 method = als_models, 
+                                 n = seq(10, 100, 10))
+```
+
+The results of the three ALS models are plotted below in ROC curve and Precision-Recall.
+
+ALS model without normalization performs the best among the three models.
+
+```{r als_ROC, message=FALSE, warning=FALSE}
+plot(als_eval_results, annotate = TRUE, legend="topleft")
+title("ALS_ROC Curve")
+```
+
+```{r als_PR, message=FALSE, warning=FALSE}
+plot(als_eval_results, "prec/rec", annotate = TRUE, legend="bottomleft")
+title("ALS_Precision-Recall")
+```
+
+
+### Metrics
+We are going to study the error metrics of the best model of each algorithm and compare their performances.
+
+```{r assgin traning set and test set}
+train <- getData(eval_sets, 'train')
+known <- getData(eval_sets, 'known')
+unknown <- getData(eval_sets, 'unknown')
+```
+
+#### UBCF
+```{r metrics UBCF}
+# UBCF Model
+UBCF_train <- Recommender(getData(eval_sets, "train"), "IBCF", parameter = list(method = "pearson", normalize = "center"))
+
+# Accuracy Metrics of UBCF Model
+UBCF_pred <- predict(UBCF_train,getData(eval_sets,'known'), type = 'ratings')
+UBCF_error <- calcPredictionAccuracy(UBCF_pred, getData(eval_sets, "unknown"))
+UBCF_error
+```
+
+#### IBCF
+```{r metrics IBCF}
+#IBCF Model
+IBCF_train <- Recommender(getData(eval_sets, "train"), "IBCF", parameter = list(method = "Euclidean", normalize = "center"))
+
+# Accuracy Metrics of IBCF Model
+IBCF_pred <- predict(IBCF_train,getData(eval_sets,'known'), type = 'ratings')
+IBCF_error <- calcPredictionAccuracy(IBCF_pred, getData(eval_sets, "unknown"))
+IBCF_error
+```
+
+#### SVD
+```{r metrics SVD}
+#SVD Model
+SVD_train <- Recommender(getData(eval_sets, "train"), "SVD")
+
+# Accuracy Metrics of SVD Model
+SVD_pred <- predict(SVD_train,getData(eval_sets,'known'), type = 'ratings')
+SVD_error <- calcPredictionAccuracy(SVD_pred, getData(eval_sets, "unknown"))
+SVD_error
+```
+
+#### ALS
+```{r metrics als}
+#als Model
+ALS_train <- Recommender(getData(eval_sets, "train"), "ALS")
+
+# Accuracy Metrics of ALS Model
+ALS_pred <- predict(ALS_train,getData(eval_sets,'known'), type = 'ratings')
+ALS_error <- calcPredictionAccuracy(ALS_pred, getData(eval_sets, "unknown"))
+ALS_error
+```
+
+
+### Conclusion
+By comparing the metrics, it shows that the original non-normalized alternating least square (ALS) model performs the best by having the lowest RMSE value among all our models.
+
+```{r conclusion recommenderlab RMSE}
+rbind(UBCF_error, IBCF_error, SVD_error, ALS_error) %>%
+  data.frame() %>%
+  rownames_to_column('Model') %>%
+  arrange(RMSE) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c('striped','bordered'), full_width = FALSE) %>%
+  add_header_above(c('Metrics Comparison'=4))
+```
+
+```{r remove variables, message=FALSE, warning=FALSE}
+# remove variables, clear space for downstream process
+rm(list=ls())
+```
+
+
+# Build Model Using Spark
+From the section above, we have concluded that ALS model performs the best by comparing with UBCF, IBCF and SVD model.  In this second section, we are going to build a recommender system using the library `sparklyr` with alternating least square (ALS) model.
+
+
+## Create Local Spark Connection
+Config Spark local server. Set 50% of our system(PC)'s accessible memory to Spark.
+
+```{r set spark config}
+conf <- spark_config()
+conf$spark.memory.fraction <- 0.5
+
+sc <- spark_connect(master = 'local', config = conf)
+```
+
+
+## Import Large MovieLens Dataset
+
+### Data Exploration
+The large `MovieLens` dataset contains 27,753,444 ratings and 1,108,997 tag applications across 58,098 movies.  These data were created by 283,228 users between January 09, 1995 and September 26, 2018, and generated as a dataset on September 26, 2018.  All users had rated at least 1 movies.  Each user is represented by an ID and no other information is provided.  All ratings are made on a 5-star scale with half-star increments (0.5 star - 5.0 stars).
+
+As the dataset is relatively too large which will overload our system's memory, to meet the requirement of project but also make the it executable in PC, the `ratings` dataset is shrinked to around 12,000+ users and 12,000+ movies with over 1 million ratings only for our study.
+
+```{r read data, message=FALSE, warning=FALSE, cache=TRUE}
+#set local file path
+path = 'C://Users//wsyin//Documents//Data 612//Projects//Project Final//ml-latest//'
+
+movies <- read.csv(str_c(path,'movies.csv'), stringsAsFactors = FALSE) %>% 
+  filter(movieId %in% c(1:70000)) %>%
+  #remove non graphical chacters to avoid errors when copying data to Spark
+  mutate(title = title %>% str_replace_all('[^[:space:][:alnum:][:punct:]]','')) %>%
+  rename(item = movieId)
+
+ratings <- read.csv(str_c(path, 'ratings.csv')) %>% 
+  filter(userId %in% c(1:13000)) %>%
+  filter(movieId %in% c(1:70000)) %>%
+  rename(user = userId, item = movieId)
+```
+
+
+```{r dimension}
+ratings %>%
+  select(user, item, rating) %>%
+  spread(key=item, value = rating) %>%
+  select(-user) %>%
+  as.matrix() %>%
+  as('realRatingMatrix')
+```
+
+## Copy Data to Spark
+Copy the datasets `movies` and `ratings` to Spark. Note that [user IDs] and [movie IDs] are renamed to [user] and [item] respectively because Spark Recommender takes [user] and [item] as default arguments.
+
+```{r load data movielense}
+sdf_movies <- sdf_copy_to(sc, movies, 'movies', overwrite = TRUE)
+sdf_ratings <- sdf_copy_to(sc, ratings, 'ratings', overwrite = TRUE)
+
+# remove variables to clear space
+rm(movies, ratings)
+```
+
+
+## Train-Test-Split
+split the dataset into training set (80%) and testing set (20%).
+
+```{r train test split 2}
+movie_split <- sdf_ratings %>%
+  sdf_random_split(training = 0.8, testing = 0.2)
+
+movie_train <- movie_split$training
+movie_test <- movie_split$testing
+```
+
+
+## Train Model
+Train an ALS recommendation model in Spark using function `ml_als`.
+
+```{r train model in spark}
+model_formula = rating ~ user + item
+rec_als_spark <- ml_als(movie_train, model_formula, max_iter = 5)
+```
+
+
+## Make Prediction
+Predict ratings using function `ml_predict`.
+
+```{r predict spark}
+predict_spark <- ml_predict(rec_als_spark, movie_test)
+```
+
+
+## Calculate RMSE
+Calculate RMSE of the Spark recommendation model using the testing set.
+
+The RMSE value is about 0.86, which is very low. Our Spark recommender system has great performance.
+
+```{r spark rmse, message=FALSE, warning=FALSE}
+rmse_spark <- predict_spark %>% 
+  filter(!isnan(prediction)) %>%
+  summarise((rating - prediction)^2 %>% mean() %>% sqrt()) %>%
+  collect() %>%
+  as.numeric()
+print(str_c('RMSE of Model Built in Spark: ',rmse_spark %>% as.character()))
+```
+
+
+## Make Top 10 Recomendation for Each User
+Create top 10 item recommendations for all users. Showing the top 10 movie recommendations for the first 5 users below as an example.
+
+```{r top 10 recommendations}
+rec_result <- ml_recommend(rec_als_spark, type = 'item', 10) %>% 
+  left_join(sdf_movies %>% select(item, title), by = c('item')) %>%
+  select(user, title) %>%
+  group_by(user) %>%
+  mutate(rank = rank(title)) %>%
+  mutate(rank = paste('Recommendation', rank %>% as.character())) %>%
+  collect() %>%
+  select(user, rank, title) %>%
+  rename(User = user, Rec_ID = rank, `Recommended Movies` = title)
+  #spread(key = rank, value = title) %>%
+  #arrange(user) %>%
+  #kable() %>%
+  #kable_styling(bootstrap_options = c('bordered', 'striped'), full_width = TRUE) %>%
+  #scroll_box(height = '400px')
+
+rec_result %>%
+  spread(key = Rec_ID, value = `Recommended Movies`) %>%
+  select(-`Recommendation 10`, `Recommendation 10`) %>%
+  filter(User %in% 1:10)
+```
+
+
+## Disconnect to Spark
+Disconnect our R from Spark.
+
+```{r disconnect Spark}
+spark_disconnect(sc)
+```
+
+
+## Recommender UI with Shiny
+Using output from the recommender system built in Spark, we can use Shiny to design a simple user interface.
+
+```{r shiny, eval=FALSE}
+ui <- fluidPage(
+  titlePanel("Movie Recommender"),
+  sidebarLayout(
+    sidebarPanel(
+      textInput("txtInput", "Input User ID (Range from 1:12000):")
+    ),
+    mainPanel(
+      paste("Movies that you might be interested in:"),
+      tableOutput('tblOutput')
+    )
+  )
+)
+
+server <- shinyServer(function(input,output){
+  output$tblOutput <- renderTable({
+    recommendations <- rec_result %>% filter(User == input$txtInput) %>% select(Rec_ID, `Recommended Movies`)
+  })
+})
+
+shinyApp(ui = ui, server = server)
+```
+
+```{r include=FALSE}
+image_url <- 'https://raw.githubusercontent.com/oggyluky11/DATA-612-2020-SUMMER/master/Final%20Project/Shiny.PNG'
+
+```
+
+<center><img src="`r image_url`"></center>
+
+```{r include=FALSE}
+#clear space
+rm(list=ls())
+```
